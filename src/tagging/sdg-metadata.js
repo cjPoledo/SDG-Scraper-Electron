@@ -30,7 +30,7 @@ export const SDG_METADATA = [
   },
   {
     number: 3,
-    name: 'Good Health and Well-being',
+    name: 'Good Health and Well-Being',
     slug: 'goodhealthandwellbeing',
     abbreviations: ['goodhealth', 'goodhealthwellbeing', 'healthforall'],
   },
@@ -44,7 +44,7 @@ export const SDG_METADATA = [
     number: 5,
     name: 'Gender Equality',
     slug: 'genderequality',
-    abbreviations: ['genderequality', 'womenempowerment', 'empowerwomen'],
+    abbreviations: ['genderequality', 'womenempowerment', 'empowerwomen', 'heforshe'],
   },
   {
     number: 6,
@@ -96,25 +96,25 @@ export const SDG_METADATA = [
     number: 13,
     name: 'Climate Action',
     slug: 'climateaction',
-    abbreviations: ['climateaction', 'climatechange', 'actonclimate'],
+    abbreviations: ['climateaction', 'climatechange', 'actonclimate', 'globalwarming'],
   },
   {
     number: 14,
     name: 'Life Below Water',
     slug: 'lifebelowwater',
-    abbreviations: ['lifebelowwater', 'oceanlife', 'saveourocean'],
+    abbreviations: ['lifebelowwater', 'oceanlife', 'saveourocean', 'oceansday', 'worldoceansday'],
   },
   {
     number: 15,
     name: 'Life on Land',
     slug: 'lifeonland',
-    abbreviations: ['lifeonland', 'biodiversity', 'forests'],
+    abbreviations: ['lifeonland', 'biodiversity', 'forests', 'deforestation', 'protectourplanet'],
   },
   {
     number: 16,
     name: 'Peace, Justice and Strong Institutions',
     slug: 'peacejusticeandstronginstitutions',
-    abbreviations: ['peaceandjustice', 'stronginstitutions', 'peacejustice'],
+    abbreviations: ['peaceandjustice', 'stronginstitutions', 'peacejustice', 'humanrights', 'accesstojustice'],
   },
   {
     number: 17,
