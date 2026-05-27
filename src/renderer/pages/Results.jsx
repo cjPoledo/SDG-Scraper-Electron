@@ -352,10 +352,15 @@ export default function Results() {
                           : <span className="text-slate-600 text-xs">—</span>
                       }
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px]">
-                      <span className="truncate block font-mono">
-                        {post.matched_on ?? '—'}
-                      </span>
+                    <td className="px-4 py-2.5 text-xs text-slate-500 max-w-[160px]">
+                      {post.matched_on
+                        ? String(post.matched_on).split(',').map((m, i) => (
+                            <span key={i} className="block truncate font-mono leading-snug" title={m.trim()}>
+                              {m.trim()}
+                            </span>
+                          ))
+                        : <span className="text-slate-600">—</span>
+                      }
                     </td>
                   </tr>
                 )

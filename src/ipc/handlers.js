@@ -167,7 +167,8 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
       .prepare(
         `SELECT p.*,
                 GROUP_CONCAT(t.sdg_number) AS sdg_numbers,
-                GROUP_CONCAT(t.confidence) AS confidences
+                GROUP_CONCAT(t.confidence) AS confidences,
+                GROUP_CONCAT(t.matched_on) AS matched_on
          FROM posts p
          LEFT JOIN sdg_tags t ON t.post_id = p.id
          ${platform ? 'WHERE p.platform = ?' : ''}
