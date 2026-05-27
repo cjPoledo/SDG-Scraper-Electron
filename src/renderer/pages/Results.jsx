@@ -10,37 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
-
-// ─── SDG color mapping (17 goals) ────────────────────────────────────────────
-// Official UN SDG colours (approximate hex)
-const SDG_COLORS = {
-  1:  '#E5243B', 2:  '#DDA63A', 3:  '#4C9F38', 4:  '#C5192D',
-  5:  '#FF3A21', 6:  '#26BDE2', 7:  '#FCC30B', 8:  '#A21942',
-  9:  '#FD6925', 10: '#DD1367', 11: '#FD9D24', 12: '#BF8B2E',
-  13: '#3F7E44', 14: '#0A97D9', 15: '#56C02B', 16: '#00689D',
-  17: '#19486A',
-}
-
-function SdgPill({ number, active, onClick }) {
-  const color = SDG_COLORS[number] ?? '#3B82F6'
-  return (
-    <button
-      onClick={() => onClick(number)}
-      aria-pressed={active}
-      title={`SDG ${number}`}
-      className={[
-        'inline-flex items-center justify-center w-8 h-8 rounded text-xs font-bold',
-        'transition-all duration-150 cursor-pointer border',
-        active
-          ? 'text-white border-transparent shadow-lg scale-105'
-          : 'text-slate-400 bg-slate-800 border-slate-700 hover:border-slate-500 hover:text-slate-200',
-      ].join(' ')}
-      style={active ? { backgroundColor: color, borderColor: color } : undefined}
-    >
-      {number}
-    </button>
-  )
-}
+import { SdgBadge, SdgPill } from '../sdg-ui.jsx'
 
 function ConfidenceBadge({ confidence }) {
   const styles = {
@@ -364,14 +334,7 @@ export default function Results() {
                     <td className="px-4 py-2.5">
                       <div className="flex flex-wrap gap-1">
                         {sdgs.length > 0 ? sdgs.map(n => (
-                          <span
-                            key={n}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-bold text-white"
-                            style={{ backgroundColor: SDG_COLORS[n] ?? '#3B82F6' }}
-                            title={`SDG ${n}`}
-                          >
-                            {n}
-                          </span>
+                          <SdgBadge key={n} number={n} />
                         )) : (
                           <span className="text-slate-600 text-xs">—</span>
                         )}

@@ -15,23 +15,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-
-// ─── SDG colours (official UN palette) ───────────────────────────────────────
-
-const SDG_COLORS = {
-  1:'#E5243B', 2:'#DDA63A', 3:'#4C9F38', 4:'#C5192D', 5:'#FF3A21',
-  6:'#26BDE2', 7:'#FCC30B', 8:'#A21942', 9:'#FD6925', 10:'#DD1367',
-  11:'#FD9D24', 12:'#BF8B2E', 13:'#3F7E44', 14:'#0A97D9', 15:'#56C02B',
-  16:'#00689D', 17:'#19486A',
-}
-
-const SDG_NAMES = {
-  1:'No Poverty', 2:'Zero Hunger', 3:'Good Health', 4:'Quality Education',
-  5:'Gender Equality', 6:'Clean Water', 7:'Clean Energy', 8:'Decent Work',
-  9:'Innovation', 10:'Reduced Inequalities', 11:'Sustainable Cities',
-  12:'Responsible Consumption', 13:'Climate Action', 14:'Life Below Water',
-  15:'Life on Land', 16:'Peace & Justice', 17:'Partnerships',
-}
+import { SDG_COLORS, SDG_SHORT_NAMES as SDG_NAMES, SDG_FULL_NAMES, SdgBadge } from '../sdg-ui.jsx'
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
@@ -60,13 +44,9 @@ function SdgBarChart({ data }) {
         return (
           <div key={n} className="flex items-center gap-2 group">
             {/* SDG number badge */}
-            <span
-              className="inline-flex items-center justify-center w-6 h-5 rounded text-[10px] font-bold text-white shrink-0"
-              style={{ backgroundColor: SDG_COLORS[n] }}
-              title={SDG_NAMES[n]}
-            >
-              {n}
-            </span>
+            <SdgBadge number={n} size="sm" />
+            {/* Short name */}
+            <span className="text-xs text-slate-500 w-36 shrink-0 truncate">{SDG_NAMES[n]}</span>
             {/* Bar */}
             <div className="flex-1 h-4 bg-slate-800 rounded-sm overflow-hidden">
               <div
@@ -325,7 +305,7 @@ export default function Dashboard() {
         <KpiCard
           label="Top SDG"
           value={loading ? '…' : topSDG ? `SDG ${topSDG.sdg_number}` : '—'}
-          sub={topSDG ? `${topSDG.post_count} posts · ${SDG_NAMES[topSDG.sdg_number]}` : undefined}
+          sub={topSDG ? `${topSDG.post_count} posts · ${SDG_FULL_NAMES[topSDG.sdg_number]}` : undefined}
           accent="text-amber-300"
         />
       </div>
@@ -474,13 +454,12 @@ export default function Dashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-2">
-                      <span
-                        className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-bold text-white"
-                        style={{ backgroundColor: SDG_COLORS[row.sdg_number] ?? '#3B82F6' }}
-                        title={`SDG ${row.sdg_number} — ${SDG_NAMES[row.sdg_number]}`}
-                      >
-                        {row.sdg_number}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <SdgBadge number={row.sdg_number} />
+                        <span className="text-xs text-slate-500 truncate max-w-[100px]">
+                          {SDG_NAMES[row.sdg_number]}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-slate-300 text-sm font-medium">
                       {row.count.toLocaleString()}
