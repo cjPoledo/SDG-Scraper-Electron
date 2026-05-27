@@ -319,12 +319,14 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
     ).all(...postWhereParams)
 
     // ── Posts over time (monthly buckets, most recent 24 months) ────────────
+    // Build a separate where for this query that also filters out null dates
+    const monthWhereParts = [...postWhereParts, 'p.date IS NOT NULL']
+    const monthWhere = `WHERE ${monthWhereParts.join(' AND ')}`
     const byMonth = db.prepare(
       `SELECT month, post_count FROM (
          SELECT strftime('%Y-%m', p.date) AS month, COUNT(*) AS post_count
          FROM posts p
-         ${postWhere}
-         WHERE p.date IS NOT NULL
+         ${monthWhere}
          GROUP BY month
          ORDER BY month DESC
          LIMIT 24
