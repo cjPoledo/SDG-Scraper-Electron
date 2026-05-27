@@ -142,26 +142,35 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
   // ── Posts & SDG tags ──────────────────────────────────────────────────────
 
   ipcMain.handle('posts:query', async (_event, filters = {}) => {
-    const { sdgNumber, platform, limit = 200, offset = 0 } = filters
+    const { sdgNumber, platform, pageId, limit = 200, offset = 0 } = filters
 
-    // Build dynamic query depending on filter combination
+    // Build WHERE clauses dynamically
+    const whereParts = []
+    const params     = []
+
     if (sdgNumber) {
+      // SDG-filtered path: JOIN sdg_tags (one row per tag per post)
+      whereParts.push('t.sdg_number = ?'); params.push(sdgNumber)
+      if (platform) { whereParts.push('p.platform = ?'); params.push(platform) }
+      if (pageId)   { whereParts.push('p.page_id = ?');  params.push(pageId)   }
+      const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : ''
+
       return db
         .prepare(
           `SELECT p.*, t.sdg_number, t.confidence, t.matched_on
            FROM posts p
            JOIN sdg_tags t ON t.post_id = p.id
-           WHERE t.sdg_number = ?
-           ${platform ? 'AND p.platform = ?' : ''}
+           ${where}
            ORDER BY p.date DESC
            LIMIT ? OFFSET ?`
         )
-        .all(
-          ...[sdgNumber, platform ? platform : null, limit, offset].filter(
-            (v) => v !== null
-          )
-        )
+        .all(...params, limit, offset)
     }
+
+    // No SDG filter: GROUP_CONCAT path
+    if (platform) { whereParts.push('p.platform = ?'); params.push(platform) }
+    if (pageId)   { whereParts.push('p.page_id = ?');  params.push(pageId)   }
+    const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : ''
 
     return db
       .prepare(
@@ -171,18 +180,26 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
                 GROUP_CONCAT(t.matched_on) AS matched_on
          FROM posts p
          LEFT JOIN sdg_tags t ON t.post_id = p.id
-         ${platform ? 'WHERE p.platform = ?' : ''}
+         ${where}
          GROUP BY p.id
          ORDER BY p.date DESC
          LIMIT ? OFFSET ?`
       )
-      .all(...[platform ? platform : null, limit, offset].filter((v) => v !== null))
+      .all(...params, limit, offset)
   })
 
   ipcMain.handle('posts:export', async (_event, filters = {}) => {
-    const { sdgNumber, platform } = filters
+    const { sdgNumber, platform, pageId } = filters
+
+    const whereParts = []
+    const params     = []
 
     if (sdgNumber) {
+      whereParts.push('t.sdg_number = ?'); params.push(sdgNumber)
+      if (platform) { whereParts.push('p.platform = ?'); params.push(platform) }
+      if (pageId)   { whereParts.push('p.page_id = ?');  params.push(pageId)   }
+      const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : ''
+
       return db
         .prepare(
           `SELECT p.id, p.platform, p.page_id, p.text, p.hashtags,
@@ -190,12 +207,15 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
                   t.sdg_number, t.confidence, t.matched_on
            FROM posts p
            JOIN sdg_tags t ON t.post_id = p.id
-           WHERE t.sdg_number = ?
-           ${platform ? 'AND p.platform = ?' : ''}
+           ${where}
            ORDER BY p.date DESC`
         )
-        .all(...[sdgNumber, platform ? platform : null].filter((v) => v !== null))
+        .all(...params)
     }
+
+    if (platform) { whereParts.push('p.platform = ?'); params.push(platform) }
+    if (pageId)   { whereParts.push('p.page_id = ?');  params.push(pageId)   }
+    const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : ''
 
     return db
       .prepare(
@@ -206,11 +226,11 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
                 GROUP_CONCAT(t.matched_on) AS matched_on
          FROM posts p
          LEFT JOIN sdg_tags t ON t.post_id = p.id
-         ${platform ? 'WHERE p.platform = ?' : ''}
+         ${where}
          GROUP BY p.id
          ORDER BY p.date DESC`
       )
-      .all(...[platform ? platform : null].filter((v) => v !== null))
+      .all(...params)
   })
 
   // ── SDG metadata ──────────────────────────────────────────────────────────

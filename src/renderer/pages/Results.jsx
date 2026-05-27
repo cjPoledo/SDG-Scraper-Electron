@@ -93,6 +93,7 @@ const PAGE_SIZE = 50
 
 export default function Results() {
   const [posts, setPosts]         = useState([])
+  const [pages, setPages]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [exporting, setExporting] = useState(false)
   const [error, setError]         = useState(null)
@@ -100,18 +101,29 @@ export default function Results() {
   // Filters
   const [activeSdg, setActiveSdg]     = useState(null) // number or null
   const [platform, setPlatform]       = useState('')
+  const [pageId, setPageId]           = useState('')
   const [offset, setOffset]           = useState(0)
+
+  // ── Load pages list (for filter dropdown) ──────────────────────────────────
+
+  useEffect(() => {
+    window.api.pages.list()
+      .then(setPages)
+      .catch(() => {}) // non-fatal
+  }, [])
 
   // ── Load posts ──────────────────────────────────────────────────────────────
 
   const loadPosts = useCallback(async () => {
     setLoading(true)
+    setPosts([])
     try {
       const filters = {
         limit:  PAGE_SIZE,
         offset,
-        ...(activeSdg  ? { sdgNumber: activeSdg } : {}),
-        ...(platform   ? { platform }             : {}),
+        ...(activeSdg ? { sdgNumber: activeSdg } : {}),
+        ...(platform  ? { platform }             : {}),
+        ...(pageId    ? { pageId }               : {}),
       }
       const data = await window.api.posts.query(filters)
       setPosts(data)
@@ -121,12 +133,12 @@ export default function Results() {
     } finally {
       setLoading(false)
     }
-  }, [activeSdg, platform, offset])
+  }, [activeSdg, platform, pageId, offset])
 
   useEffect(() => { loadPosts() }, [loadPosts])
 
   // Reset to page 1 when filters change
-  useEffect(() => { setOffset(0) }, [activeSdg, platform])
+  useEffect(() => { setOffset(0) }, [activeSdg, platform, pageId])
 
   // ── SDG filter toggle ───────────────────────────────────────────────────────
 
@@ -142,6 +154,7 @@ export default function Results() {
       const filters = {
         ...(activeSdg ? { sdgNumber: activeSdg } : {}),
         ...(platform  ? { platform }             : {}),
+        ...(pageId    ? { pageId }               : {}),
       }
       const data = await window.api.posts.export(filters)
       const rows = data.map(flattenForExport)
@@ -213,19 +226,41 @@ export default function Results() {
           </div>
         </div>
 
-        {/* Platform filter */}
-        <div className="flex items-center gap-3">
-          <div className="text-xs text-slate-500">Platform</div>
-          <select
-            className="select w-40 text-xs py-1"
-            value={platform}
-            onChange={e => setPlatform(e.target.value)}
-            aria-label="Filter by platform"
-          >
-            <option value="">All platforms</option>
-            <option value="facebook">Facebook</option>
-            <option value="wordpress">WordPress</option>
-          </select>
+        {/* Platform + page filters */}
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-slate-500">Platform</div>
+            <select
+              className="select w-40 text-xs py-1"
+              value={platform}
+              onChange={e => { setPlatform(e.target.value); setPageId('') }}
+              aria-label="Filter by platform"
+            >
+              <option value="">All platforms</option>
+              <option value="facebook">Facebook</option>
+              <option value="wordpress">WordPress</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-slate-500">Page</div>
+            <select
+              className="select w-56 text-xs py-1"
+              value={pageId}
+              onChange={e => setPageId(e.target.value)}
+              aria-label="Filter by page"
+            >
+              <option value="">All pages</option>
+              {pages
+                .filter(p => !platform || p.platform === platform)
+                .map(p => (
+                  <option key={p.id} value={p.page_id}>
+                    {p.label ?? p.url}
+                  </option>
+                ))
+              }
+            </select>
+          </div>
         </div>
       </div>
 
