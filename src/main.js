@@ -49,10 +49,11 @@ app.whenReady().then(() => {
   // Open the database and run migrations before creating the window
   db = openDb()
 
-  // Register all IPC handlers (passes db so handlers can query it)
-  registerIpcHandlers(ipcMain, db, mainWindow)
-
   createWindow()
+
+  // Pass a getter so handlers always reference the current window,
+  // even if it is recreated later (macOS activate).
+  registerIpcHandlers(ipcMain, db, () => mainWindow)
 
   app.on('activate', () => {
     // macOS: re-create window when dock icon is clicked and no windows are open

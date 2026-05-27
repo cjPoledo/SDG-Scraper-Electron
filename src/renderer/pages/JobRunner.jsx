@@ -4,8 +4,9 @@
  * Trigger scrape jobs and monitor their progress.
  * - Select a saved page
  * - Start a scrape job
- * - See live progress streamed from the main process
- * - Review recent job history
+ * - Live progress streamed from the main process updates both the
+ *   active-job card AND the job history row in real time
+ * - Elapsed timer so the page never feels stuck
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -28,28 +29,84 @@ function StatusBadge({ status }) {
   )
 }
 
-// ─── Progress bar ─────────────────────────────────────────────────────────────
+// ─── Elapsed timer ────────────────────────────────────────────────────────────
 
-function ProgressBar({ status, message, postsFound }) {
-  const isActive = status === 'running' || status === 'tagging'
+function useElapsed(running) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!running) { setElapsed(0); return }
+    setElapsed(0)
+    const t = setInterval(() => setElapsed(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [running])
+  return elapsed
+}
+
+function fmtElapsed(s) {
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+// ─── Active job card ──────────────────────────────────────────────────────────
+
+function ActiveJobCard({ job }) {
+  const isActive = job.status === 'running' || job.status === 'tagging'
+  const isDone   = job.status === 'done'
+  const isError  = job.status === 'error'
+  const elapsed  = useElapsed(isActive)
+
+  const barColor = isDone ? 'bg-green-500' : isError ? 'bg-red-500' : 'bg-blue-500'
+
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-        <span>{message ?? 'Waiting…'}</span>
-        {postsFound > 0 && <span className="tabular-nums">{postsFound} posts</span>}
+    <div className={[
+      'mt-4 rounded-lg border p-4 transition-colors duration-300',
+      isDone  ? 'border-green-700/40 bg-green-900/10' :
+      isError ? 'border-red-700/40 bg-red-900/10' :
+                'border-blue-700/30 bg-blue-900/10',
+    ].join(' ')}>
+
+      {/* Top row: status + elapsed */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          {isActive && <Spinner className="text-blue-400" />}
+          {isDone   && <span className="text-green-400 text-sm">✓</span>}
+          {isError  && <span className="text-red-400 text-sm">✗</span>}
+          <StatusBadge status={job.status} />
+          <span className="text-xs text-slate-500 font-mono">Job #{job.jobId}</span>
+        </div>
+        {isActive && (
+          <span className="text-xs font-mono text-slate-500 tabular-nums">
+            {fmtElapsed(elapsed)}
+          </span>
+        )}
       </div>
+
+      {/* Message */}
+      <p className={[
+        'text-sm mb-3',
+        isDone ? 'text-green-300' : isError ? 'text-red-300' : 'text-slate-300',
+      ].join(' ')}>
+        {job.message ?? 'Working…'}
+      </p>
+
+      {/* Progress bar */}
       <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
         {isActive ? (
-          <div
-            className="h-full bg-blue-500 rounded-full animate-pulse"
-            style={{ width: '60%' }}
-          />
-        ) : status === 'done' ? (
-          <div className="h-full bg-green-500 rounded-full" style={{ width: '100%' }} />
-        ) : status === 'error' ? (
-          <div className="h-full bg-red-500 rounded-full" style={{ width: '100%' }} />
-        ) : null}
+          // Indeterminate sliding bar
+          <div className={`h-full ${barColor} rounded-full animate-[slide_1.5s_ease-in-out_infinite]`}
+               style={{ width: '40%' }} />
+        ) : (
+          <div className={`h-full ${barColor} rounded-full transition-all duration-500`}
+               style={{ width: '100%' }} />
+        )}
       </div>
+
+      {/* Posts counter */}
+      {(job.postsFound ?? 0) > 0 && (
+        <p className="mt-2 text-xs text-slate-500 tabular-nums">
+          {job.postsFound} post{job.postsFound !== 1 ? 's' : ''} processed
+        </p>
+      )}
     </div>
   )
 }
@@ -57,19 +114,31 @@ function ProgressBar({ status, message, postsFound }) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function JobRunner() {
-  const [pages, setPages]         = useState([])
-  const [jobs, setJobs]           = useState([])
+  const [pages, setPages]               = useState([])
+  const [jobs, setJobs]                 = useState([])
   const [selectedPage, setSelectedPage] = useState('')
-  const [loading, setLoading]     = useState(true)
-  const [starting, setStarting]   = useState(false)
-  const [removing, setRemoving]   = useState(null) // jobId being removed
-  const [error, setError]         = useState(null)
-  const [activeJob, setActiveJob] = useState(null) // { jobId, status, message, postsFound }
-
-  // Cleanup ref for the progress listener unsubscribe function
-  const unsubRef = useRef(null)
+  const [loading, setLoading]           = useState(true)
+  const [starting, setStarting]         = useState(false)
+  const [removing, setRemoving]         = useState(null)
+  const [error, setError]               = useState(null)
+  const [activeJob, setActiveJob]       = useState(null)
 
   // ── Load data ───────────────────────────────────────────────────────────────
+
+  // Stable ref so the progress handler can call loadJobs without being a dep
+  const loadJobsRef = useRef(null)
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const jobsData = await window.api.jobs.list()
+      setJobs(jobsData)
+    } catch (e) {
+      setError(`Failed to load jobs: ${e.message}`)
+    }
+  }, [])
+
+  // Keep the ref current whenever loadJobs changes (it's stable, but good practice)
+  useEffect(() => { loadJobsRef.current = loadJobs }, [loadJobs])
 
   const loadData = useCallback(async () => {
     try {
@@ -79,38 +148,54 @@ export default function JobRunner() {
       ])
       setPages(pagesData)
       setJobs(jobsData)
-      if (pagesData.length > 0 && !selectedPage) {
-        setSelectedPage(String(pagesData[0].id))
-      }
+      setSelectedPage(prev => {
+        if (prev) return prev
+        return pagesData.length > 0 ? String(pagesData[0].id) : ''
+      })
       setError(null)
     } catch (e) {
       setError(`Failed to load data: ${e.message}`)
     } finally {
       setLoading(false)
     }
-  }, [selectedPage])
+  }, []) // ← no deps: stable function, uses setState updater form
+
+  // ── Initial data load (once on mount) ──────────────────────────────────────
 
   useEffect(() => {
     loadData()
+  }, [loadData])
 
-    // Subscribe to job progress push events from main process
+  // ── Subscribe to progress events (once on mount, never re-subscribes) ──────
+
+  useEffect(() => {
     const unsub = window.api.onJobProgress((data) => {
+      // Update the active job card
       setActiveJob(prev => {
         if (!prev || prev.jobId !== data.jobId) return prev
         return { ...prev, ...data }
       })
 
-      // Refresh job list when a job finishes
+      // Patch the matching row in the jobs table live so status/posts_found
+      // updates without a full reload
+      setJobs(prev => prev.map(j =>
+        j.id === data.jobId
+          ? { ...j,
+              status:      data.status ?? j.status,
+              posts_found: data.postsFound ?? j.posts_found,
+              error:       data.status === 'error' ? data.message : j.error,
+            }
+          : j
+      ))
+
+      // Full reload when job finishes to get final DB values (finished_at etc.)
       if (data.status === 'done' || data.status === 'error') {
-        loadData()
+        loadJobsRef.current?.()
       }
     })
 
-    unsubRef.current = unsub
-    return () => {
-      if (typeof unsub === 'function') unsub()
-    }
-  }, [loadData])
+    return () => { if (typeof unsub === 'function') unsub() }
+  }, []) // ← empty deps: subscribe once, use ref for loadJobs
 
   // ── Start job ───────────────────────────────────────────────────────────────
 
@@ -123,7 +208,8 @@ export default function JobRunner() {
     try {
       const { jobId } = await window.api.jobs.start(Number(selectedPage))
       setActiveJob({ jobId, status: 'running', message: 'Starting…', postsFound: 0 })
-      await loadData()
+      // Reload so the new job row appears in the table immediately
+      await loadJobs()
     } catch (e) {
       setError(`Failed to start job: ${e.message}`)
     } finally {
@@ -139,7 +225,8 @@ export default function JobRunner() {
     setError(null)
     try {
       await window.api.jobs.remove(jobId)
-      await loadData()
+      setJobs(prev => prev.filter(j => j.id !== jobId))
+      if (activeJob?.jobId === jobId) setActiveJob(null)
     } catch (e) {
       setError(`Failed to remove job: ${e.message}`)
     } finally {
@@ -149,7 +236,8 @@ export default function JobRunner() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const hasActiveJob = activeJob && (activeJob.status === 'running' || activeJob.status === 'tagging')
+  const hasActiveJob = activeJob &&
+    (activeJob.status === 'running' || activeJob.status === 'tagging')
 
   return (
     <div className="p-6">
@@ -157,23 +245,26 @@ export default function JobRunner() {
       <div className="mb-6">
         <h1 className="text-lg font-semibold text-slate-100">Jobs</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Select a page and start a scrape job. Progress streams in real time.
+          Select a page and start a scrape job. Progress updates live.
         </p>
       </div>
 
-      {/* Start job form */}
+      {/* Start job card */}
       <div className="card p-4 mb-6">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Start a scrape</h2>
 
         {pages.length === 0 && !loading ? (
           <p className="text-sm text-slate-500">
-            No pages yet. <a href="#/pages" className="text-blue-400 hover:underline">Add a page first.</a>
+            No pages yet.{' '}
+            <a href="#/pages" className="text-blue-400 hover:underline">Add a page first.</a>
           </p>
         ) : (
           <form onSubmit={handleStart} noValidate>
             <div className="flex gap-3 items-end">
               <div className="flex-1">
-                <label htmlFor="page-select" className="block text-xs text-slate-500 mb-1">Page</label>
+                <label htmlFor="page-select" className="block text-xs text-slate-500 mb-1">
+                  Page
+                </label>
                 <select
                   id="page-select"
                   className="select"
@@ -193,7 +284,7 @@ export default function JobRunner() {
                 type="submit"
                 className="btn-primary"
                 disabled={starting || hasActiveJob || loading || !selectedPage}
-                aria-busy={starting}
+                aria-busy={starting || hasActiveJob}
               >
                 {starting ? (
                   <span className="flex items-center gap-1.5"><Spinner /> Starting…</span>
@@ -205,27 +296,28 @@ export default function JobRunner() {
           </form>
         )}
 
-        {/* Active job progress */}
-        {activeJob && (
-          <ProgressBar
-            status={activeJob.status}
-            message={activeJob.message}
-            postsFound={activeJob.postsFound}
-          />
-        )}
+        {/* Active job progress card */}
+        {activeJob && <ActiveJobCard job={activeJob} />}
 
         {error && (
-          <p className="mt-2 text-xs text-red-400" role="alert">{error}</p>
+          <p className="mt-3 text-xs text-red-400" role="alert">{error}</p>
         )}
       </div>
 
       {/* Job history */}
       <div className="card overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-800">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
           <h2 className="text-sm font-medium text-slate-300">
             Recent jobs
-            {!loading && <span className="ml-2 text-xs text-slate-600 font-normal">({jobs.length})</span>}
+            {!loading && (
+              <span className="ml-2 text-xs text-slate-600 font-normal">({jobs.length})</span>
+            )}
           </h2>
+          {hasActiveJob && (
+            <span className="flex items-center gap-1.5 text-xs text-blue-400">
+              <Spinner className="text-blue-400" /> Live
+            </span>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -254,45 +346,64 @@ export default function JobRunner() {
                     No jobs yet.
                   </td>
                 </tr>
-              ) : jobs.map(job => (
-                <tr key={job.id} className="table-row-hover">
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-500 tabular-nums">
-                    #{job.id}
-                  </td>
-                  <td className="px-4 py-2.5 max-w-[200px]">
-                    <div className="text-slate-300 truncate">{job.label ?? job.url ?? '—'}</div>
-                    <div className="text-slate-600 text-xs truncate font-mono">{job.platform}</div>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <StatusBadge status={job.status} />
-                    {job.error && (
-                      <div className="text-xs text-red-400 mt-0.5 truncate max-w-[180px]" title={job.error}>
-                        {job.error}
+              ) : jobs.map(job => {
+                const isLive = activeJob?.jobId === job.id &&
+                  (job.status === 'running' || job.status === 'tagging')
+                return (
+                  <tr
+                    key={job.id}
+                    className={[
+                      'table-row-hover transition-colors duration-300',
+                      isLive ? 'bg-blue-900/5' : '',
+                    ].join(' ')}
+                  >
+                    <td className="px-4 py-2.5 font-mono text-xs text-slate-500 tabular-nums">
+                      #{job.id}
+                    </td>
+                    <td className="px-4 py-2.5 max-w-[200px]">
+                      <div className="text-slate-300 truncate">{job.label ?? job.url ?? '—'}</div>
+                      <div className="text-slate-600 text-xs truncate font-mono">{job.platform}</div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        {isLive && <Spinner className="text-blue-400 shrink-0" />}
+                        <StatusBadge status={job.status} />
                       </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-300">
-                    {job.posts_found ?? 0}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500 tabular-nums whitespace-nowrap">
-                    {job.started_at?.replace('T', ' ').slice(0, 16) ?? '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500 tabular-nums whitespace-nowrap">
-                    {job.finished_at?.replace('T', ' ').slice(0, 16) ?? '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button
-                      className="btn btn-danger text-xs px-2 py-1"
-                      onClick={() => handleRemove(job.id)}
-                      disabled={removing === job.id || job.status === 'running'}
-                      aria-label={`Remove job #${job.id}`}
-                      title={job.status === 'running' ? 'Cannot delete a running job' : 'Delete job and its posts'}
-                    >
-                      {removing === job.id ? <Spinner /> : 'Remove'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {job.error && (
+                        <div
+                          className="text-xs text-red-400 mt-0.5 truncate max-w-[200px]"
+                          title={job.error}
+                        >
+                          {job.error}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-300">
+                      {job.posts_found ?? 0}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-slate-500 tabular-nums whitespace-nowrap">
+                      {job.started_at?.replace('T', ' ').slice(0, 16) ?? '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-slate-500 tabular-nums whitespace-nowrap">
+                      {isLive
+                        ? <span className="text-blue-400/60 font-mono">running…</span>
+                        : (job.finished_at?.replace('T', ' ').slice(0, 16) ?? '—')
+                      }
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        className="btn btn-danger text-xs px-2 py-1"
+                        onClick={() => handleRemove(job.id)}
+                        disabled={removing === job.id || isLive}
+                        aria-label={`Remove job #${job.id}`}
+                        title={isLive ? 'Cannot delete a running job' : 'Delete job and its posts'}
+                      >
+                        {removing === job.id ? <Spinner /> : 'Remove'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -303,7 +414,13 @@ export default function JobRunner() {
 
 function Spinner({ className = '' }) {
   return (
-    <svg className={`animate-spin w-3.5 h-3.5 text-slate-400 ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+    <svg
+      className={`animate-spin w-3.5 h-3.5 text-slate-400 ${className}`}
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
     </svg>

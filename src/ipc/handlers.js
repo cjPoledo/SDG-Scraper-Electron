@@ -13,9 +13,12 @@ import { SDG_METADATA } from '../tagging/sdg-metadata.js'
 
 /** @param {Electron.IpcMain} ipcMain */
 /** @param {import('better-sqlite3').Database} db */
-/** @param {Electron.BrowserWindow | null} mainWindowRef — used for push events */
-export function registerIpcHandlers(ipcMain, db, mainWindowRef) {
+/** @param {() => Electron.BrowserWindow | null} getMainWindow — getter so we always use the current window */
+export function registerIpcHandlers(ipcMain, db, getMainWindow) {
   const scraper = new ScraperManager(db)
+
+  /** Send a push event to the renderer if the window is alive */
+  const send = (channel, data) => getMainWindow()?.webContents?.send(channel, data)
 
   // ── Pages ─────────────────────────────────────────────────────────────────
 
@@ -65,26 +68,22 @@ export function registerIpcHandlers(ipcMain, db, mainWindowRef) {
           label: page.label,
         },
         (progressData) => {
-          // Push progress to renderer — mainWindowRef may be null during tests
-          mainWindowRef?.webContents?.send('job:progress', progressData)
+          send('job:progress', progressData)
         }
       )
       .then(() => {
+        // manager.run() already emits the final 'done' progress event;
+        // here we just persist finished_at to the DB.
         db.prepare(
           'UPDATE scrape_jobs SET status = ?, finished_at = datetime(\'now\') WHERE id = ?'
         ).run('done', jobId)
-        mainWindowRef?.webContents?.send('job:progress', {
-          jobId,
-          status: 'done',
-          message: 'Scrape complete',
-        })
       })
       .catch((err) => {
         console.error(`Job ${jobId} failed:`, err)
         db.prepare(
           'UPDATE scrape_jobs SET status = ?, error = ?, finished_at = datetime(\'now\') WHERE id = ?'
         ).run('error', err.message, jobId)
-        mainWindowRef?.webContents?.send('job:progress', {
+        send('job:progress', {
           jobId,
           status: 'error',
           message: err.message,
