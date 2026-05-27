@@ -25,6 +25,14 @@ function copyStaticAssetsPlugin() {
         copyFileSync(xlsxSrc, resolve(__dirname, 'out/main/keywords.xlsx'))
         console.log('[copy-static] keywords.xlsx → out/main/')
       }
+
+      // Keep public/icon.png in sync with resources/icon.png at build time
+      const iconSrc  = resolve(__dirname, 'resources/icon.png')
+      const iconDest = resolve(__dirname, 'public/icon.png')
+      if (existsSync(iconSrc)) {
+        copyFileSync(iconSrc, iconDest)
+        console.log('[copy-static] resources/icon.png → public/icon.png')
+      }
     }
   }
 }

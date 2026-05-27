@@ -56,10 +56,12 @@ function IconHelp({ className = 'w-4 h-4' }) {
 
 function IconSDG({ className = 'w-5 h-5' }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" className="text-blue-600" fill="currentColor" />
-      <text x="12" y="16" textAnchor="middle" fontSize="9" fontWeight="700" fill="white" fontFamily="Fira Sans, sans-serif">SDG</text>
-    </svg>
+    <img
+      src="/icon.png"
+      alt="SDG Scraper"
+      className={className}
+      style={{ objectFit: 'contain' }}
+    />
   )
 }
 
