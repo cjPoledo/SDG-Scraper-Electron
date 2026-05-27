@@ -20,6 +20,7 @@ import { WordPressAdapter } from '../adapters/wordpress.adapter.js'
 import { loadKeywords }     from '../tagging/keywords.js'
 import { buildEngine }      from '../tagging/engine.js'
 import { join } from 'path'
+import { app } from 'electron'
 
 // ─── Adapter registry ─────────────────────────────────────────────────────────
 // Maps platform string (as stored in the pages table) → adapter constructor.
@@ -39,13 +40,16 @@ export class ScraperManager {
     this.db = db
 
     // Load keyword map once at construction time (synchronous xlsx parse).
-    // If keywords.xlsx is missing, the tagging engine falls back to hashtag-only.
+    // Prefer the user-editable copy in userData; fall back to the bundled copy
+    // in __dirname (dev mode or first-launch race condition).
+    // If neither exists, keyword matching is disabled (hashtag matching still works).
+    const userDataPath = join(app.getPath('userData'), 'keywords.xlsx')
+    const bundledPath  = join(__dirname, 'keywords.xlsx')
+    const xlsxPath     = require('fs').existsSync(userDataPath) ? userDataPath : bundledPath
+
     try {
-      // keywords.xlsx is copied to out/main/ by the vite copy plugin.
-      // __dirname here is out/main/ at runtime (injected by electron-vite).
-      this.keywordMap = loadKeywords(
-        join(__dirname, 'keywords.xlsx')
-      )
+      this.keywordMap = loadKeywords(xlsxPath)
+      console.log('[scraper] Loaded keywords from:', xlsxPath)
     } catch (err) {
       console.warn(
         '[scraper] keywords.xlsx not found or failed to load — keyword matching disabled.',

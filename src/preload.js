@@ -81,6 +81,16 @@ contextBridge.exposeInMainWorld('api', {
     getMetadata: () => ipcRenderer.invoke('sdg:getMetadata'),
   },
 
+  // ── Keywords file ─────────────────────────────────────────────────────────
+  keywords: {
+    /** @returns {Promise<string>} absolute path to the user-editable keywords.xlsx */
+    getPath:      () => ipcRenderer.invoke('keywords:getPath'),
+    /** Open keywords.xlsx in the system default app (Excel, LibreOffice, etc.) */
+    openFile:     () => ipcRenderer.invoke('keywords:openFile'),
+    /** Reveal keywords.xlsx in Finder / Explorer */
+    showInFolder: () => ipcRenderer.invoke('keywords:showInFolder'),
+  },
+
   // ── Dashboard stats ───────────────────────────────────────────────────────
   dashboard: {
     /**

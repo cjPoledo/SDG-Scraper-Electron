@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
+import { copyFileSync, existsSync } from 'fs'
 import { openDb } from './storage/db.js'
 import { registerIpcHandlers } from './ipc/handlers.js'
 
@@ -44,8 +45,28 @@ function createWindow() {
   }
 }
 
+// ─── Keywords bootstrap ──────────────────────────────────────────────────────
+// On first launch (or if the file was deleted), copy the bundled keywords.xlsx
+// into the user's writable data directory. After that the user can edit it freely
+// and the app will always load from userData, not from inside the asar bundle.
+function bootstrapKeywords() {
+  const dest = join(app.getPath('userData'), 'keywords.xlsx')
+  if (!existsSync(dest)) {
+    const src = join(__dirname, 'keywords.xlsx')
+    if (existsSync(src)) {
+      copyFileSync(src, dest)
+      console.log('[keywords] Copied keywords.xlsx to userData:', dest)
+    } else {
+      console.warn('[keywords] Bundled keywords.xlsx not found at', src)
+    }
+  }
+}
+
 // ─── App lifecycle ───────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  // Ensure keywords.xlsx is in the user-writable userData folder
+  bootstrapKeywords()
+
   // Open the database and run migrations before creating the window
   db = openDb()
 

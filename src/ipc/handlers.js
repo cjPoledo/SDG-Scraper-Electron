@@ -10,6 +10,9 @@
 
 import { ScraperManager } from '../scraper/manager.js'
 import { SDG_METADATA } from '../tagging/sdg-metadata.js'
+import { app, shell } from 'electron'
+import { join } from 'path'
+import { existsSync } from 'fs'
 
 /** @param {Electron.IpcMain} ipcMain */
 /** @param {import('better-sqlite3').Database} db */
@@ -237,6 +240,25 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
 
   ipcMain.handle('sdg:getMetadata', async () => {
     return SDG_METADATA
+  })
+
+  // ── Keywords file ─────────────────────────────────────────────────────────
+
+  ipcMain.handle('keywords:getPath', async () => {
+    return join(app.getPath('userData'), 'keywords.xlsx')
+  })
+
+  ipcMain.handle('keywords:openFile', async () => {
+    const filePath = join(app.getPath('userData'), 'keywords.xlsx')
+    if (!existsSync(filePath)) {
+      throw new Error('keywords.xlsx not found in user data folder.')
+    }
+    await shell.openPath(filePath)
+  })
+
+  ipcMain.handle('keywords:showInFolder', async () => {
+    const filePath = join(app.getPath('userData'), 'keywords.xlsx')
+    shell.showItemInFolder(filePath)
   })
 
   // ── Dashboard stats ───────────────────────────────────────────────────────

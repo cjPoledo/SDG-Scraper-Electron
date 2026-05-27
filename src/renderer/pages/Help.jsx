@@ -7,6 +7,16 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+// ─── Keywords file path loader ────────────────────────────────────────────────
+
+function useKeywordsPath() {
+  const [path, setPath] = useState(null)
+  useEffect(() => {
+    window.api.keywords.getPath().then(setPath).catch(() => {})
+  }, [])
+  return path
+}
+
 // ─── Colour chips for SDG badges in the manual ───────────────────────────────
 
 const SDG_COLORS = {
@@ -37,6 +47,7 @@ const SECTIONS = [
   { id: 'dashboard',    label: '4. Dashboard' },
   { id: 'sdgs',         label: 'The 17 SDGs' },
   { id: 'tagging',      label: 'How Tagging Works' },
+  { id: 'keywords',     label: 'Editing Keywords' },
   { id: 'export',       label: 'Exporting Data' },
   { id: 'tips',         label: 'Tips & Troubleshooting' },
 ]
@@ -134,8 +145,10 @@ function Divider() {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Help() {
-  const [activeId, setActiveId] = useState('overview')
+  const [activeId, setActiveId]       = useState('overview')
+  const [kwError, setKwError]         = useState(null)
   const contentRef = useRef(null)
+  const keywordsPath = useKeywordsPath()
 
   // Highlight active TOC entry based on scroll position
   useEffect(() => {
@@ -411,6 +424,67 @@ export default function Help() {
 
           <Divider />
 
+          {/* ── Editing Keywords ── */}
+          <H2 id="keywords">Editing Keywords</H2>
+          <P>
+            The keyword list that drives SDG tagging lives in a file called <strong className="text-slate-200">keywords.xlsx</strong>. You can open and edit it in Excel, LibreOffice Calc, or any spreadsheet app — no technical knowledge required.
+          </P>
+
+          <H3>How the file is structured</H3>
+          <Ul>
+            <Li>Each <strong className="text-slate-300">column</strong> corresponds to one SDG (column A = SDG 1, column B = SDG 2, and so on up to column Q = SDG 17).</Li>
+            <Li>The <strong className="text-slate-300">first row</strong> is a header row (e.g. "SDG 1 - No Poverty"). Do not delete or move it.</Li>
+            <Li>Each row below the header is a keyword. Add new keywords by typing them into empty rows in the appropriate column.</Li>
+            <Li>To remove a keyword, simply delete the cell contents.</Li>
+          </Ul>
+
+          <H3>Keyword rules</H3>
+          <Ul>
+            <Li>Keywords are matched as <strong className="text-slate-300">whole words</strong>, case-insensitively. "poverty" matches "Poverty" and "POVERTY" but not "impoverishment".</Li>
+            <Li>Use a <strong className="text-slate-300">slash to provide variants</strong> in a single cell: <code className="text-blue-300 text-xs">Child labor/labour</code> creates two keywords — "Child labor" and "Child labour". Similarly, <code className="text-blue-300 text-xs">effect/s</code> creates "effect" and "effects".</Li>
+            <Li>British and American spellings (e.g. organisation/organization) are <strong className="text-slate-300">expanded automatically</strong> — you only need to enter one form.</Li>
+          </Ul>
+
+          <H3>After editing</H3>
+          <P>
+            Save the file in Excel, then <strong className="text-slate-200">re-run a scrape job</strong> on the pages you want to re-tag. The app reloads the keyword list at the start of each scrape — existing posts already in the database are not automatically re-tagged.
+          </P>
+
+          <Warn>
+            Do not change the number of columns or move SDG columns around. Column position determines which SDG a keyword belongs to.
+          </Warn>
+
+          {/* Interactive file buttons */}
+          <div className="mt-4 p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg space-y-3">
+            <p className="text-xs text-slate-400 font-medium">Your keywords file</p>
+            {keywordsPath && (
+              <p className="text-[11px] text-slate-600 font-mono break-all">{keywordsPath}</p>
+            )}
+            {kwError && (
+              <p className="text-xs text-red-400">{kwError}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="btn-primary text-xs px-3 py-1.5"
+                onClick={async () => {
+                  setKwError(null)
+                  try { await window.api.keywords.openFile() }
+                  catch (e) { setKwError(e.message) }
+                }}
+              >
+                ✎ Open in Excel / Spreadsheet
+              </button>
+              <button
+                className="btn-secondary text-xs px-3 py-1.5"
+                onClick={() => window.api.keywords.showInFolder()}
+              >
+                ↗ Show in Finder / Explorer
+              </button>
+            </div>
+          </div>
+
+          <Divider />
+
           {/* ── Exporting ── */}
           <H2 id="export">Exporting Data</H2>
           <P>
@@ -469,7 +543,7 @@ export default function Help() {
           <Ul>
             <Li>Keyword matching can occasionally produce false positives — for example, a post about "life" might match SDG 15 (Life on Land) even if it is unrelated.</Li>
             <Li>Hashtag matches (<Badge label="hashtag" color="#3B82F6" />) are more reliable than keyword matches (<Badge label="keyword" color="#475569" />).</Li>
-            <Li>You can improve accuracy by updating the <code className="text-blue-300 text-xs">keywords.xlsx</code> file with more specific or fewer broad keywords for problematic SDGs.</Li>
+            <Li>You can improve accuracy by editing the keyword file — see the <button onClick={() => scrollTo('keywords')} className="text-blue-400 hover:underline">Editing Keywords</button> section above.</Li>
           </Ul>
 
           <H3>A post appears more than once</H3>
