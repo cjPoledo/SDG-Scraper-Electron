@@ -10,6 +10,7 @@ import Dashboard   from './pages/Dashboard.jsx'
 import PageManager from './pages/PageManager.jsx'
 import JobRunner   from './pages/JobRunner.jsx'
 import Results     from './pages/Results.jsx'
+import Help        from './pages/Help.jsx'
 
 // ─── SVG Icons (inline, no dependency) ────────────────────────────────────────
 
@@ -41,6 +42,14 @@ function IconDashboard({ className = 'w-4 h-4' }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+  )
+}
+
+function IconHelp({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   )
 }
@@ -107,12 +116,23 @@ function Sidebar() {
         ))}
       </ul>
 
-      {/* Footer version / info */}
-      <div className="px-4 py-3 border-t border-slate-800">
-        <div className="text-[10px] text-slate-600 font-mono leading-relaxed">
-          Electron + React<br />
-          Playwright · SQLite
-        </div>
+      {/* Help link */}
+      <div className="px-2 py-3 border-t border-slate-800">
+        <NavLink
+          to="/help"
+          title="User manual"
+          className={({ isActive }) =>
+            [
+              'flex items-center gap-2.5 px-3 py-2 rounded text-sm font-medium transition-colors duration-150 cursor-pointer',
+              isActive
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent',
+            ].join(' ')
+          }
+        >
+          <IconHelp className="w-4 h-4 shrink-0" />
+          Help
+        </NavLink>
       </div>
     </nav>
   )
@@ -134,6 +154,7 @@ export default function App() {
             <Route path="/pages"     element={<PageManager />} />
             <Route path="/jobs"      element={<JobRunner />} />
             <Route path="/results"   element={<Results />} />
+            <Route path="/help"      element={<Help />} />
           </Routes>
         </main>
       </div>
