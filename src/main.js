@@ -10,6 +10,14 @@ let db = null
 
 // ─── Window factory ─────────────────────────────────────────────────────────
 function createWindow() {
+  // Resolve icon: use .icns on macOS, .ico on Windows, .png elsewhere.
+  // electron-builder handles icon conversion at build time; this covers dev mode.
+  const { platform } = process
+  const iconExt  = platform === 'darwin' ? 'icns' : platform === 'win32' ? 'ico' : 'png'
+  const iconName = `icon.${iconExt}`
+  // Walk up from out/main to find the project root resources/ folder
+  const iconPath = join(__dirname, '..', '..', 'resources', iconName)
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -17,6 +25,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#030712', // matches bg-gray-950
     show: false, // show only after ready-to-show to avoid flash
+    icon: iconPath,
     webPreferences: {
       // Security: context isolation ON, Node.js in renderer OFF
       contextIsolation: true,
