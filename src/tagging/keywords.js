@@ -17,10 +17,7 @@
  */
 
 import XLSX from 'xlsx'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { join } from 'path'
 
 // ─── British ↔ American spelling pairs ───────────────────────────────────────
 // Each pair is [british, american]. Both variants are added when either appears.
@@ -156,6 +153,8 @@ function expandSpellingVariants(kw) {
  * @returns {Map<number, Set<string>>}  sdgNumber (1–17) → Set of lowercase keywords
  */
 export function loadKeywords(xlsxPath) {
+  // __dirname is injected by electron-vite → points to out/main/ at runtime.
+  // keywords.xlsx is copied there by the vite copy plugin.
   const filePath = xlsxPath ?? join(__dirname, 'keywords.xlsx')
 
   const workbook = XLSX.readFile(filePath)

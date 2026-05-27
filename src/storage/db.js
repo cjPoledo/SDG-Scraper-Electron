@@ -11,11 +11,8 @@
 
 import Database from 'better-sqlite3'
 import { readFileSync } from 'fs'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 import { app } from 'electron'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // Ordered list of migration files. Add new entries here for future migrations.
 const MIGRATIONS = [
@@ -63,6 +60,9 @@ function runMigrations(db) {
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.version)) continue
 
+    // __dirname is injected by electron-vite as the directory of the bundled
+    // main entry (out/main/ in dev, resources/app/out/main/ in prod).
+    // The copy-migrations plugin puts .sql files alongside the bundle.
     const sqlPath = join(__dirname, 'migrations', migration.file)
     const sql = readFileSync(sqlPath, 'utf8')
 

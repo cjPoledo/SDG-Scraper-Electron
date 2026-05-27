@@ -19,10 +19,7 @@ import { FacebookAdapter }  from '../adapters/facebook.adapter.js'
 import { WordPressAdapter } from '../adapters/wordpress.adapter.js'
 import { loadKeywords }     from '../tagging/keywords.js'
 import { buildEngine }      from '../tagging/engine.js'
-import { join, dirname }    from 'path'
-import { fileURLToPath }    from 'url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { join } from 'path'
 
 // ─── Adapter registry ─────────────────────────────────────────────────────────
 // Maps platform string (as stored in the pages table) → adapter constructor.
@@ -44,8 +41,10 @@ export class ScraperManager {
     // Load keyword map once at construction time (synchronous xlsx parse).
     // If keywords.xlsx is missing, the tagging engine falls back to hashtag-only.
     try {
+      // keywords.xlsx is copied to out/main/ by the vite copy plugin.
+      // __dirname here is out/main/ at runtime (injected by electron-vite).
       this.keywordMap = loadKeywords(
-        join(__dirname, '../tagging/keywords.xlsx')
+        join(__dirname, 'keywords.xlsx')
       )
     } catch (err) {
       console.warn(
