@@ -110,49 +110,56 @@ export class ScraperManager {
       UPDATE scrape_jobs SET posts_found = ? WHERE id = ?
     `)
 
-    // Process in batches of 50 to avoid holding a giant transaction open
+    // Tag all posts first (async), then persist in sync batched transactions.
+    // better-sqlite3 transactions must be synchronous — no async/await inside.
+    onProgress({ jobId, status: 'tagging', message: 'Tagging posts…', postsFound: posts.length })
+
+    const tagged = await Promise.all(
+      posts.map(async (post) => ({
+        post,
+        tags: await this.engine.tagPost(post),
+      }))
+    )
+
+    // Process in batches of 50
     const BATCH = 50
     let saved = 0
 
-    for (let i = 0; i < posts.length; i += BATCH) {
-      const batch = posts.slice(i, i + BATCH)
+    const saveBatch = this.db.transaction((batch) => {
+      for (const { post, tags } of batch) {
+        insertPost.run({
+          id:       post.id,
+          platform: post.platform,
+          pageId:   post.pageId,
+          text:     post.text,
+          hashtags: JSON.stringify(post.hashtags ?? []),
+          date:     post.date,
+          url:      post.url,
+          author:   post.author,
+          rawHtml:  post.rawHtml,
+        })
 
-      await this.db.transaction(async () => {
-        for (const post of batch) {
-          // Persist the post
-          insertPost.run({
-            id:       post.id,
-            platform: post.platform,
-            pageId:   post.pageId,
-            text:     post.text,
-            hashtags: JSON.stringify(post.hashtags ?? []),
-            date:     post.date,
-            url:      post.url,
-            author:   post.author,
-            rawHtml:  post.rawHtml,
+        for (const tag of tags) {
+          insertTag.run({
+            postId:     post.id,
+            sdgNumber:  tag.sdgNumber,
+            confidence: tag.confidence,
+            matchedOn:  tag.matchedOn ?? null,
           })
-
-          // Tag the post
-          const tags = await this.engine.tagPost(post)
-          for (const tag of tags) {
-            insertTag.run({
-              postId:     post.id,
-              sdgNumber:  tag.sdgNumber,
-              confidence: tag.confidence,
-              matchedOn:  tag.matchedOn ?? null,
-            })
-          }
-
-          saved++
         }
 
-        updateJobCount.run(saved, jobId)
-      })()
+        saved++
+      }
+      updateJobCount.run(saved, jobId)
+    })
+
+    for (let i = 0; i < tagged.length; i += BATCH) {
+      saveBatch(tagged.slice(i, i + BATCH))
 
       onProgress({
         jobId,
         status: 'running',
-        message: `Saved ${saved}/${posts.length} posts…`,
+        message: `Saved ${saved}/${tagged.length} posts…`,
         postsFound: saved,
       })
     }
