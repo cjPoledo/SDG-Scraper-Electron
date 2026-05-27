@@ -238,4 +238,130 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
   ipcMain.handle('sdg:getMetadata', async () => {
     return SDG_METADATA
   })
+
+  // ── Dashboard stats ───────────────────────────────────────────────────────
+
+  ipcMain.handle('dashboard:stats', async (_event, filters = {}) => {
+    const { platform, pageId } = filters
+
+    // Build a reusable WHERE fragment for posts filtered by platform / page
+    const postWhereParts = []
+    const postWhereParams = []
+    if (platform) { postWhereParts.push('p.platform = ?'); postWhereParams.push(platform) }
+    if (pageId)   { postWhereParts.push('p.page_id = ?');  postWhereParams.push(pageId)   }
+    const postWhere = postWhereParts.length ? `WHERE ${postWhereParts.join(' AND ')}` : ''
+
+    // Same but for the sdg_tags join path
+    const tagWhereParts = [...postWhereParts]
+    const tagWhereParams = [...postWhereParams]
+    const tagWhere = tagWhereParts.length ? `WHERE ${tagWhereParts.join(' AND ')}` : ''
+
+    // ── Totals ──────────────────────────────────────────────────────────────
+    const { total_posts } = db.prepare(
+      `SELECT COUNT(*) AS total_posts FROM posts p ${postWhere}`
+    ).get(...postWhereParams)
+
+    const { tagged_posts } = db.prepare(
+      `SELECT COUNT(DISTINCT p.id) AS tagged_posts
+       FROM posts p
+       JOIN sdg_tags t ON t.post_id = p.id
+       ${tagWhere}`
+    ).get(...tagWhereParams)
+
+    const { total_tags } = db.prepare(
+      `SELECT COUNT(*) AS total_tags
+       FROM sdg_tags t
+       JOIN posts p ON p.id = t.post_id
+       ${tagWhere}`
+    ).get(...tagWhereParams)
+
+    const { total_jobs } = db.prepare(
+      `SELECT COUNT(*) AS total_jobs FROM scrape_jobs`
+    ).get()
+
+    // ── Posts per SDG ───────────────────────────────────────────────────────
+    const bySDG = db.prepare(
+      `SELECT t.sdg_number, COUNT(DISTINCT p.id) AS post_count
+       FROM sdg_tags t
+       JOIN posts p ON p.id = t.post_id
+       ${tagWhere}
+       GROUP BY t.sdg_number
+       ORDER BY t.sdg_number ASC`
+    ).all(...tagWhereParams)
+
+    // ── Confidence breakdown ────────────────────────────────────────────────
+    const byConfidence = db.prepare(
+      `SELECT t.confidence, COUNT(*) AS count
+       FROM sdg_tags t
+       JOIN posts p ON p.id = t.post_id
+       ${tagWhere}
+       GROUP BY t.confidence`
+    ).all(...tagWhereParams)
+
+    // ── Posts per platform ──────────────────────────────────────────────────
+    const byPlatform = db.prepare(
+      `SELECT p.platform, COUNT(*) AS post_count
+       FROM posts p ${postWhere}
+       GROUP BY p.platform
+       ORDER BY post_count DESC`
+    ).all(...postWhereParams)
+
+    // ── Posts per page ──────────────────────────────────────────────────────
+    const byPage = db.prepare(
+      `SELECT p.page_id, pg.label, pg.url, pg.platform,
+              COUNT(*) AS post_count
+       FROM posts p
+       LEFT JOIN pages pg ON pg.page_id = p.page_id AND pg.platform = p.platform
+       ${postWhere}
+       GROUP BY p.page_id
+       ORDER BY post_count DESC
+       LIMIT 20`
+    ).all(...postWhereParams)
+
+    // ── Posts over time (monthly buckets, most recent 24 months) ────────────
+    const byMonth = db.prepare(
+      `SELECT month, post_count FROM (
+         SELECT strftime('%Y-%m', p.date) AS month, COUNT(*) AS post_count
+         FROM posts p
+         ${postWhere}
+         WHERE p.date IS NOT NULL
+         GROUP BY month
+         ORDER BY month DESC
+         LIMIT 24
+       ) ORDER BY month ASC`
+    ).all(...postWhereParams)
+
+    // ── Top matched keywords ────────────────────────────────────────────────
+    const topKeywords = db.prepare(
+      `SELECT t.matched_on, t.confidence, t.sdg_number, COUNT(*) AS count
+       FROM sdg_tags t
+       JOIN posts p ON p.id = t.post_id
+       WHERE t.matched_on IS NOT NULL
+       ${tagWhereParts.length ? 'AND ' + tagWhereParts.join(' AND ') : ''}
+       GROUP BY t.matched_on, t.sdg_number
+       ORDER BY count DESC
+       LIMIT 15`
+    ).all(...tagWhereParams)
+
+    // ── Recent jobs ─────────────────────────────────────────────────────────
+    const recentJobs = db.prepare(
+      `SELECT j.id, j.status, j.posts_found, j.started_at, j.finished_at,
+              p.label, p.url, p.platform
+       FROM scrape_jobs j
+       LEFT JOIN pages p ON p.id = j.page_id
+       ORDER BY j.id DESC
+       LIMIT 5`
+    ).all()
+
+    return {
+      totals: { total_posts, tagged_posts, total_tags, total_jobs },
+      bySDG,
+      byConfidence,
+      byPlatform,
+      byPage,
+      byMonth,
+      topKeywords,
+      recentJobs,
+    }
+  })
 }

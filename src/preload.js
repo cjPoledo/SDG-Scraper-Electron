@@ -81,6 +81,16 @@ contextBridge.exposeInMainWorld('api', {
     getMetadata: () => ipcRenderer.invoke('sdg:getMetadata'),
   },
 
+  // ── Dashboard stats ───────────────────────────────────────────────────────
+  dashboard: {
+    /**
+     * Fetch aggregated metrics for the dashboard.
+     * @param {{ platform?: string, pageId?: string }} filters
+     * @returns {Promise<DashboardStats>}
+     */
+    stats: (filters = {}) => ipcRenderer.invoke('dashboard:stats', filters),
+  },
+
   // ── Progress push events (main → renderer) ───────────────────────────────
   /**
    * Register a callback to receive job progress updates pushed from main.

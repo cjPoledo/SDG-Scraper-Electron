@@ -6,6 +6,7 @@
  */
 
 import { HashRouter, NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import Dashboard   from './pages/Dashboard.jsx'
 import PageManager from './pages/PageManager.jsx'
 import JobRunner   from './pages/JobRunner.jsx'
 import Results     from './pages/Results.jsx'
@@ -36,6 +37,14 @@ function IconResults({ className = 'w-4 h-4' }) {
   )
 }
 
+function IconDashboard({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+  )
+}
+
 function IconSDG({ className = 'w-5 h-5' }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -48,9 +57,10 @@ function IconSDG({ className = 'w-5 h-5' }) {
 // ─── Nav items ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { to: '/pages',   label: 'Pages',   Icon: IconPages,   title: 'Manage target pages' },
-  { to: '/jobs',    label: 'Jobs',    Icon: IconJobs,    title: 'Run scrape jobs' },
-  { to: '/results', label: 'Results', Icon: IconResults, title: 'Browse tagged posts' },
+  { to: '/dashboard', label: 'Dashboard', Icon: IconDashboard, title: 'Metrics and charts' },
+  { to: '/pages',     label: 'Pages',     Icon: IconPages,     title: 'Manage target pages' },
+  { to: '/jobs',      label: 'Jobs',      Icon: IconJobs,      title: 'Run scrape jobs' },
+  { to: '/results',   label: 'Results',   Icon: IconResults,   title: 'Browse tagged posts' },
 ]
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -119,10 +129,11 @@ export default function App() {
         {/* Main content area */}
         <main className="flex-1 overflow-y-auto" id="main-content" tabIndex={-1}>
           <Routes>
-            <Route path="/"        element={<Navigate to="/pages" replace />} />
-            <Route path="/pages"   element={<PageManager />} />
-            <Route path="/jobs"    element={<JobRunner />} />
-            <Route path="/results" element={<Results />} />
+            <Route path="/"          element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/pages"     element={<PageManager />} />
+            <Route path="/jobs"      element={<JobRunner />} />
+            <Route path="/results"   element={<Results />} />
           </Routes>
         </main>
       </div>
