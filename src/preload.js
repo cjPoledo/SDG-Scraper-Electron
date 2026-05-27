@@ -49,6 +49,13 @@ contextBridge.exposeInMainWorld('api', {
 
     /** @returns {Promise<Job[]>} */
     list: () => ipcRenderer.invoke('jobs:list'),
+
+    /**
+     * Delete a job and its associated posts/tags.
+     * @param {number} jobId
+     * @returns {Promise<void>}
+     */
+    remove: (jobId) => ipcRenderer.invoke('jobs:remove', jobId),
   },
 
   // ── Posts & SDG tags ─────────────────────────────────────────────────────

@@ -134,7 +134,7 @@ export default function PageManager() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-lg font-semibold text-slate-100">Pages</h1>

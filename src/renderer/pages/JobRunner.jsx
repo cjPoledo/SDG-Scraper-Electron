@@ -62,6 +62,7 @@ export default function JobRunner() {
   const [selectedPage, setSelectedPage] = useState('')
   const [loading, setLoading]     = useState(true)
   const [starting, setStarting]   = useState(false)
+  const [removing, setRemoving]   = useState(null) // jobId being removed
   const [error, setError]         = useState(null)
   const [activeJob, setActiveJob] = useState(null) // { jobId, status, message, postsFound }
 
@@ -130,12 +131,28 @@ export default function JobRunner() {
     }
   }
 
+  // ── Remove job ──────────────────────────────────────────────────────────────
+
+  async function handleRemove(jobId) {
+    if (!window.confirm('Delete this job and all posts scraped in this run?')) return
+    setRemoving(jobId)
+    setError(null)
+    try {
+      await window.api.jobs.remove(jobId)
+      await loadData()
+    } catch (e) {
+      setError(`Failed to remove job: ${e.message}`)
+    } finally {
+      setRemoving(null)
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const hasActiveJob = activeJob && (activeJob.status === 'running' || activeJob.status === 'tagging')
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-lg font-semibold text-slate-100">Jobs</h1>
@@ -221,18 +238,19 @@ export default function JobRunner() {
                 <th className="text-right px-4 py-2 font-medium">Posts</th>
                 <th className="text-left px-4 py-2 font-medium">Started</th>
                 <th className="text-left px-4 py-2 font-medium">Finished</th>
+                <th className="px-4 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-8 text-slate-600">
+                  <td colSpan={7} className="text-center py-8 text-slate-600">
                     <Spinner className="inline-block" /> Loading…
                   </td>
                 </tr>
               ) : jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-slate-500 text-sm">
+                  <td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
                     No jobs yet.
                   </td>
                 </tr>
@@ -261,6 +279,17 @@ export default function JobRunner() {
                   </td>
                   <td className="px-4 py-2.5 text-xs text-slate-500 tabular-nums whitespace-nowrap">
                     {job.finished_at?.replace('T', ' ').slice(0, 16) ?? '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      className="btn btn-danger text-xs px-2 py-1"
+                      onClick={() => handleRemove(job.id)}
+                      disabled={removing === job.id || job.status === 'running'}
+                      aria-label={`Remove job #${job.id}`}
+                      title={job.status === 'running' ? 'Cannot delete a running job' : 'Delete job and its posts'}
+                    >
+                      {removing === job.id ? <Spinner /> : 'Remove'}
+                    </button>
                   </td>
                 </tr>
               ))}

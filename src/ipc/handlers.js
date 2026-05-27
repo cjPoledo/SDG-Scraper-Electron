@@ -98,6 +98,36 @@ export function registerIpcHandlers(ipcMain, db, mainWindowRef) {
     return db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId)
   })
 
+  ipcMain.handle('jobs:remove', async (_event, jobId) => {
+    const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId)
+    if (!job) throw new Error(`Job ${jobId} not found`)
+
+    // Don't allow deleting a running job
+    if (job.status === 'running' || job.status === 'tagging') {
+      throw new Error('Cannot delete a job that is still running')
+    }
+
+    // Look up the page's page_id (text) to match posts
+    const page = db.prepare('SELECT page_id FROM pages WHERE id = ?').get(job.page_id)
+
+    db.transaction(() => {
+      // Delete posts scraped during this job's time window for this page.
+      // sdg_tags are deleted automatically via ON DELETE CASCADE on posts.
+      if (page && job.started_at) {
+        const finished = job.finished_at ?? new Date().toISOString()
+        db.prepare(`
+          DELETE FROM posts
+          WHERE page_id = ?
+            AND scraped_at >= ?
+            AND scraped_at <= ?
+        `).run(page.page_id, job.started_at, finished)
+      }
+
+      // Delete the job row itself
+      db.prepare('DELETE FROM scrape_jobs WHERE id = ?').run(jobId)
+    })()
+  })
+
   ipcMain.handle('jobs:list', async () => {
     return db
       .prepare(
