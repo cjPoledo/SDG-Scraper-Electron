@@ -1,0 +1,72 @@
+{
+  "name": "sdg-scraper",
+  "version": "0.1.0",
+  "description": "Desktop app for scraping and SDG-tagging social media posts",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "pack": "electron-builder --publish never",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder -w",
+    "dist:mac": "npm run build && electron-builder -m",
+    "rebuild": "electron-rebuild -f -w better-sqlite3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "playwright": "^1.44.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "electron": "^33.4.11",
+    "electron-builder": "^24.13.0",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.0"
+  },
+  "build": {
+    "appId": "com.sdg.scraper",
+    "productName": "SDG Scraper",
+    "directories": {
+      "buildResources": "resources"
+    },
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "npmRebuild": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities"
+    }
+  }
+}

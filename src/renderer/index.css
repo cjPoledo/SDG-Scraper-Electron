@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --color-primary:     #1E40AF;
+    --color-secondary:   #3B82F6;
+    --color-accent:      #D97706;
+    --color-bg:          #030712;   /* gray-950 */
+    --color-surface:     #0f172a;   /* slate-900 */
+    --color-surface-2:   #1e293b;   /* slate-800 */
+    --color-border:      #1e293b;
+    --color-muted:       #475569;   /* slate-600 */
+    --color-destructive: #DC2626;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Fira Sans', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    background-color: #030712;
+    color: #e2e8f0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Monospace figures for data columns */
+  table, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+
+  /* Focus ring */
+  *:focus-visible {
+    outline: 2px solid #3B82F6;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium
+           transition-colors duration-150 cursor-pointer
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500;
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 hover:bg-blue-500 text-white;
+  }
+  .btn-secondary {
+    @apply btn bg-slate-700 hover:bg-slate-600 text-slate-200;
+  }
+  .btn-danger {
+    @apply btn bg-red-700 hover:bg-red-600 text-white;
+  }
+  .btn:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  .card {
+    @apply bg-slate-900 border border-slate-800 rounded-lg;
+  }
+
+  .input {
+    @apply w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm
+           text-slate-100 placeholder-slate-500
+           focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500
+           transition-colors duration-150;
+  }
+
+  .select {
+    @apply input appearance-none cursor-pointer;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium;
+  }
+
+  .table-row-hover {
+    @apply hover:bg-slate-800/60 transition-colors duration-100;
+  }
+}

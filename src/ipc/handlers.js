@@ -1,0 +1,191 @@
+/**
+ * ipc/handlers.js
+ *
+ * Registers all ipcMain.handle() channels. Each handler corresponds 1:1 with
+ * an entry in src/preload.js.
+ *
+ * Pattern: ipcMain.handle(channel, async (event, ...args) => { ... })
+ * Return value is automatically sent back to ipcRenderer.invoke() caller.
+ */
+
+import { ScraperManager } from '../scraper/manager.js'
+import { SDG_METADATA } from '../tagging/sdg-metadata.js'
+
+/** @param {Electron.IpcMain} ipcMain */
+/** @param {import('better-sqlite3').Database} db */
+/** @param {Electron.BrowserWindow | null} mainWindowRef — used for push events */
+export function registerIpcHandlers(ipcMain, db, mainWindowRef) {
+  const scraper = new ScraperManager(db)
+
+  // ── Pages ─────────────────────────────────────────────────────────────────
+
+  ipcMain.handle('pages:list', async () => {
+    return db.prepare('SELECT * FROM pages ORDER BY created_at DESC').all()
+  })
+
+  ipcMain.handle('pages:add', async (_event, { platform, url, pageId, label }) => {
+    if (!platform || !url || !pageId) {
+      throw new Error('platform, url, and pageId are required')
+    }
+    const stmt = db.prepare(
+      'INSERT INTO pages (platform, page_id, url, label) VALUES (?, ?, ?, ?)'
+    )
+    const info = stmt.run(platform, pageId, url, label ?? null)
+    return { id: info.lastInsertRowid }
+  })
+
+  ipcMain.handle('pages:remove', async (_event, id) => {
+    db.prepare('DELETE FROM pages WHERE id = ?').run(id)
+  })
+
+  // ── Scrape jobs ───────────────────────────────────────────────────────────
+
+  ipcMain.handle('jobs:start', async (_event, pageId) => {
+    // Look up the page config
+    const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(pageId)
+    if (!page) throw new Error(`Page ${pageId} not found`)
+
+    // Create a job row in pending state
+    const jobInfo = db
+      .prepare(
+        'INSERT INTO scrape_jobs (page_id, status, started_at) VALUES (?, ?, datetime(\'now\'))'
+      )
+      .run(pageId, 'running')
+    const jobId = jobInfo.lastInsertRowid
+
+    // Run the scraper asynchronously — don't await here so the IPC response
+    // returns the jobId immediately and progress events stream back via push.
+    scraper
+      .run(
+        jobId,
+        {
+          platform: page.platform,
+          pageId: page.page_id,
+          url: page.url,
+          label: page.label,
+        },
+        (progressData) => {
+          // Push progress to renderer — mainWindowRef may be null during tests
+          mainWindowRef?.webContents?.send('job:progress', progressData)
+        }
+      )
+      .then(() => {
+        db.prepare(
+          'UPDATE scrape_jobs SET status = ?, finished_at = datetime(\'now\') WHERE id = ?'
+        ).run('done', jobId)
+        mainWindowRef?.webContents?.send('job:progress', {
+          jobId,
+          status: 'done',
+          message: 'Scrape complete',
+        })
+      })
+      .catch((err) => {
+        console.error(`Job ${jobId} failed:`, err)
+        db.prepare(
+          'UPDATE scrape_jobs SET status = ?, error = ?, finished_at = datetime(\'now\') WHERE id = ?'
+        ).run('error', err.message, jobId)
+        mainWindowRef?.webContents?.send('job:progress', {
+          jobId,
+          status: 'error',
+          message: err.message,
+        })
+      })
+
+    return { jobId }
+  })
+
+  ipcMain.handle('jobs:getStatus', async (_event, jobId) => {
+    return db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId)
+  })
+
+  ipcMain.handle('jobs:list', async () => {
+    return db
+      .prepare(
+        `SELECT j.*, p.url, p.platform, p.label
+         FROM scrape_jobs j
+         LEFT JOIN pages p ON p.id = j.page_id
+         ORDER BY j.id DESC
+         LIMIT 100`
+      )
+      .all()
+  })
+
+  // ── Posts & SDG tags ──────────────────────────────────────────────────────
+
+  ipcMain.handle('posts:query', async (_event, filters = {}) => {
+    const { sdgNumber, platform, limit = 200, offset = 0 } = filters
+
+    // Build dynamic query depending on filter combination
+    if (sdgNumber) {
+      return db
+        .prepare(
+          `SELECT p.*, t.sdg_number, t.confidence, t.matched_on
+           FROM posts p
+           JOIN sdg_tags t ON t.post_id = p.id
+           WHERE t.sdg_number = ?
+           ${platform ? 'AND p.platform = ?' : ''}
+           ORDER BY p.date DESC
+           LIMIT ? OFFSET ?`
+        )
+        .all(
+          ...[sdgNumber, platform ? platform : null, limit, offset].filter(
+            (v) => v !== null
+          )
+        )
+    }
+
+    return db
+      .prepare(
+        `SELECT p.*,
+                GROUP_CONCAT(t.sdg_number) AS sdg_numbers,
+                GROUP_CONCAT(t.confidence) AS confidences
+         FROM posts p
+         LEFT JOIN sdg_tags t ON t.post_id = p.id
+         ${platform ? 'WHERE p.platform = ?' : ''}
+         GROUP BY p.id
+         ORDER BY p.date DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(...[platform ? platform : null, limit, offset].filter((v) => v !== null))
+  })
+
+  ipcMain.handle('posts:export', async (_event, filters = {}) => {
+    const { sdgNumber, platform } = filters
+
+    if (sdgNumber) {
+      return db
+        .prepare(
+          `SELECT p.id, p.platform, p.page_id, p.text, p.hashtags,
+                  p.date, p.url, p.author,
+                  t.sdg_number, t.confidence, t.matched_on
+           FROM posts p
+           JOIN sdg_tags t ON t.post_id = p.id
+           WHERE t.sdg_number = ?
+           ${platform ? 'AND p.platform = ?' : ''}
+           ORDER BY p.date DESC`
+        )
+        .all(...[sdgNumber, platform ? platform : null].filter((v) => v !== null))
+    }
+
+    return db
+      .prepare(
+        `SELECT p.id, p.platform, p.page_id, p.text, p.hashtags,
+                p.date, p.url, p.author,
+                GROUP_CONCAT(t.sdg_number) AS sdg_numbers,
+                GROUP_CONCAT(t.confidence) AS confidences,
+                GROUP_CONCAT(t.matched_on) AS matched_on
+         FROM posts p
+         LEFT JOIN sdg_tags t ON t.post_id = p.id
+         ${platform ? 'WHERE p.platform = ?' : ''}
+         GROUP BY p.id
+         ORDER BY p.date DESC`
+      )
+      .all(...[platform ? platform : null].filter((v) => v !== null))
+  })
+
+  // ── SDG metadata ──────────────────────────────────────────────────────────
+
+  ipcMain.handle('sdg:getMetadata', async () => {
+    return SDG_METADATA
+  })
+}
