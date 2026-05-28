@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
+    "exceljs": "^4.4.0",
     "playwright": "^1.44.0",
     "xlsx": "^0.18.5"
   },

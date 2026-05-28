@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { SdgBadge, SdgPill } from '../sdg-ui.jsx'
 
 function ConfidenceBadge({ confidence }) {
@@ -34,11 +35,66 @@ function exportToCsv(rows, filename) {
   XLSX.writeFile(wb, filename, { bookType: 'csv' })
 }
 
-function exportToXlsx(rows, filename) {
-  const ws  = XLSX.utils.json_to_sheet(rows)
-  const wb  = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Posts')
-  XLSX.writeFile(wb, filename)
+const SDG_COLORS = {
+  1: 'E5243B',  2: 'DDA63A',  3: '4C9F38',  4: 'C5192D',
+  5: 'FF3A21',  6: '26BDE2',  7: 'FCC30B',  8: 'A21942',
+  9: 'FD6925', 10: 'DD1367', 11: 'FD9D24', 12: 'BF8B2E',
+ 13: '3F7E44', 14: '0A97D9', 15: '56C02B', 16: '00689D',
+ 17: '19486A',
+}
+
+async function exportToXlsx(rows, filename) {
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Posts')
+
+  ws.columns = [
+    { key: 'id',          header: 'Post ID',      width: 10 },
+    { key: 'platform',    header: 'Platform',      width: 14 },
+    { key: 'page_id',     header: 'Page ID',       width: 22 },
+    { key: 'date',        header: 'Date',          width: 14 },
+    { key: 'author',      header: 'Author',        width: 20 },
+    { key: 'text',        header: 'Text',          width: 60 },
+    { key: 'hashtags',    header: 'Hashtags',      width: 30 },
+    { key: 'url',         header: 'URL',           width: 42 },
+    { key: 'sdg_numbers', header: 'SDG Numbers',   width: 16 },
+    { key: 'confidences', header: 'Confidence',    width: 16 },
+    { key: 'matched_on',  header: 'Matched On',    width: 40 },
+  ]
+
+  // Style header row
+  const headerRow = ws.getRow(1)
+  headerRow.eachCell(cell => {
+    cell.font      = { bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }
+    cell.alignment = { vertical: 'middle' }
+  })
+  headerRow.height = 20
+
+  // Freeze header row
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+  // Add data rows with SDG color coding
+  rows.forEach(row => {
+    const dataRow = ws.addRow(row)
+    const sdgNums = String(row.sdg_numbers || '').split(',').map(Number).filter(Boolean)
+    if (sdgNums.length >= 1) {
+      const color = SDG_COLORS[sdgNums[0]]
+      if (color) {
+        const cell = dataRow.getCell('sdg_numbers')
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${color}` } }
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      }
+    }
+  })
+
+  const buffer = await wb.xlsx.writeBuffer()
+  const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url    = URL.createObjectURL(blob)
+  const a      = document.createElement('a')
+  a.href       = url
+  a.download   = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function flattenForExport(post) {
@@ -132,7 +188,7 @@ export default function Results() {
       const name = `sdg-posts-${ts}`
 
       if (format === 'csv') exportToCsv(rows,  `${name}.csv`)
-      else                   exportToXlsx(rows, `${name}.xlsx`)
+      else                   await exportToXlsx(rows, `${name}.xlsx`)
     } catch (e) {
       setError(`Export failed: ${e.message}`)
     } finally {
