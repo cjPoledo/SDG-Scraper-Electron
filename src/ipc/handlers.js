@@ -46,7 +46,7 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
 
   // ── Scrape jobs ───────────────────────────────────────────────────────────
 
-  ipcMain.handle('jobs:start', async (_event, pageId) => {
+  ipcMain.handle('jobs:start', async (_event, pageId, options = {}) => {
     // Look up the page config
     const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(pageId)
     if (!page) throw new Error(`Page ${pageId} not found`)
@@ -69,6 +69,7 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
           pageId: page.page_id,
           url: page.url,
           label: page.label,
+          options,
         },
         (progressData) => {
           send('job:progress', progressData)
@@ -259,6 +260,56 @@ export function registerIpcHandlers(ipcMain, db, getMainWindow) {
   ipcMain.handle('keywords:showInFolder', async () => {
     const filePath = join(app.getPath('userData'), 'keywords.xlsx')
     shell.showItemInFolder(filePath)
+  })
+
+  // ── Facebook session ──────────────────────────────────────────────────────
+
+  ipcMain.handle('facebook:sessionExists', async () => {
+    const sessionPath = join(app.getPath('userData'), 'sessions', 'facebook-session.json')
+    return existsSync(sessionPath)
+  })
+
+  ipcMain.handle('facebook:deleteSession', async () => {
+    const { rmSync } = await import('fs')
+    const { join: pathJoin } = await import('path')
+    const sessionFile = join(app.getPath('userData'), 'sessions', 'facebook-session.json')
+    const sessionDir  = join(app.getPath('userData'), 'sessions', 'facebook')
+    try { rmSync(sessionFile, { force: true }) } catch {}
+    try { rmSync(sessionDir, { recursive: true, force: true }) } catch {}
+  })
+
+  ipcMain.handle('facebook:setupSession', async () => {
+    const { FacebookAdapter } = await import('../adapters/facebook.adapter.js')
+    const adapter = new FacebookAdapter({})
+    await adapter.openLoginSession()
+  })
+
+  ipcMain.handle('facebook:openLanguageSettings', async () => {
+    const { FacebookAdapter } = await import('../adapters/facebook.adapter.js')
+    const adapter = new FacebookAdapter({})
+    await adapter.openLanguageSettings()
+  })
+
+  ipcMain.handle('facebook:getSettings', async () => {
+    const sessionPath = join(app.getPath('userData'), 'sessions', 'facebook-session.json')
+    if (!existsSync(sessionPath)) return { locale: 'fil' }
+    try {
+      const { readFileSync } = await import('fs')
+      const data = JSON.parse(readFileSync(sessionPath, 'utf8'))
+      return { locale: data.locale ?? 'fil' }
+    } catch {
+      return { locale: 'fil' }
+    }
+  })
+
+  ipcMain.handle('facebook:saveSettings', async (_event, settings) => {
+    const sessionPath = join(app.getPath('userData'), 'sessions', 'facebook-session.json')
+    const { readFileSync, writeFileSync, mkdirSync } = await import('fs')
+    const { dirname } = await import('path')
+    mkdirSync(dirname(sessionPath), { recursive: true })
+    let existing = {}
+    try { existing = JSON.parse(readFileSync(sessionPath, 'utf8')) } catch {}
+    writeFileSync(sessionPath, JSON.stringify({ ...existing, ...settings }))
   })
 
   // ── Dashboard stats ───────────────────────────────────────────────────────

@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('api', {
      * @param {number} pageId
      * @returns {Promise<{ jobId: number }>}
      */
-    start: (pageId) => ipcRenderer.invoke('jobs:start', pageId),
+    start: (pageId, options = {}) => ipcRenderer.invoke('jobs:start', pageId, options),
 
     /**
      * @param {number} jobId
@@ -99,6 +99,22 @@ contextBridge.exposeInMainWorld('api', {
      * @returns {Promise<DashboardStats>}
      */
     stats: (filters = {}) => ipcRenderer.invoke('dashboard:stats', filters),
+  },
+
+  // ── Facebook session ─────────────────────────────────────────────────────
+  facebook: {
+    /** @returns {Promise<boolean>} true if a saved session file exists */
+    sessionExists: () => ipcRenderer.invoke('facebook:sessionExists'),
+    /** Open login window for manual session setup; resolves when done */
+    setupSession: () => ipcRenderer.invoke('facebook:setupSession'),
+    /** @returns {Promise<{ locale: string }>} */
+    getSettings: () => ipcRenderer.invoke('facebook:getSettings'),
+    /** @param {{ locale: string }} settings */
+    saveSettings: (settings) => ipcRenderer.invoke('facebook:saveSettings', settings),
+    /** Open Facebook language settings in the Playwright browser */
+    openLanguageSettings: () => ipcRenderer.invoke('facebook:openLanguageSettings'),
+    /** Delete the saved session file and UDD so the user can log in fresh */
+    deleteSession: () => ipcRenderer.invoke('facebook:deleteSession'),
   },
 
   // ── Progress push events (main → renderer) ───────────────────────────────

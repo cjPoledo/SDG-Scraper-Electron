@@ -3,18 +3,6 @@
  *
  * Facebook Page scraper — Playwright-based.
  *
- * ─── STATUS: STUB ────────────────────────────────────────────────────────────
- *
- * Facebook aggressively blocks automated access. A working implementation
- * requires:
- *   1. A saved authenticated browser session (see "Session management" below)
- *   2. Randomised delays to avoid rate-limiting
- *   3. Selector maintenance — Facebook's DOM changes frequently
- *
- * This file provides the full skeleton with detailed TODO comments in each
- * section. The scrape() method throws NotImplementedError until fully
- * implemented.
- *
  * ─── Authentication approach ─────────────────────────────────────────────────
  *
  * Facebook cannot be automated with headless login (their bot detection blocks
@@ -23,7 +11,7 @@
  *   Step A — First run (manual):
  *     1. Call openLoginSession() to launch a visible Chromium window.
  *     2. Manually log in to Facebook in that window.
- *     3. Call saveSession() to persist cookies/localStorage to disk.
+ *     3. Session is saved automatically when the login window closes.
  *
  *   Step B — Subsequent runs (automated):
  *     1. launchPersistentContext() loads the saved userDataDir.
@@ -35,19 +23,19 @@
  *
  * ─── Playwright notes ────────────────────────────────────────────────────────
  *
- * We use launchPersistentContext() (not browser.newContext()) because it
- * stores all browser state (cookies, localStorage, IndexedDB, cache) in a
- * real User Data Directory across restarts — equivalent to a real Chrome
- * profile. Reference: Playwright docs — BrowserType.launchPersistentContext()
+ * We use launchPersistentContext() because it stores all browser state
+ * (cookies, localStorage, IndexedDB, cache) in a real User Data Directory
+ * across restarts — equivalent to a real Chrome profile.
  *
  * storageState({path}) saves current cookies/localStorage to JSON after a
  * scrape so the next run reuses the same session.
  */
 
 import { chromium } from 'playwright'
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { mkdirSync, existsSync, writeFileSync } from 'fs'
 import { app } from 'electron'
-import { BaseAdapter, extractHashtags, stripHtml } from './base.adapter.js'
+import { BaseAdapter, extractHashtags } from './base.adapter.js'
 
 // ─── Selectors ────────────────────────────────────────────────────────────────
 // IMPORTANT: These selectors break when Facebook updates their DOM. Update here
@@ -55,30 +43,107 @@ import { BaseAdapter, extractHashtags, stripHtml } from './base.adapter.js'
 // (more stable than class names) when available.
 
 const SELECTORS = {
-  // Container wrapping individual feed posts
-  POST_CONTAINER: '[data-pagelet^="FeedUnit"]',
+  // Container wrapping individual feed posts — story_message is present in every real post
+  POST_CONTAINER: '[data-ad-rendering-role="story_message"]',
 
-  // Post body text within a post container
-  POST_TEXT: '[data-ad-comet-preview="message"] span, [data-ad-preview="message"] span',
+  // Post body text — story_message wraps the full post body
+  POST_TEXT: '[data-ad-rendering-role="story_message"]',
 
-  // Timestamp / date link
-  POST_TIMESTAMP: 'abbr[data-utime], a[aria-label][role="link"] abbr',
+  // Post permalink — pfbid and numeric /posts/ both appear; story_fbid is a fallback
+  POST_LINK: 'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]',
 
-  // Post permalink link
-  POST_LINK: 'a[href*="/posts/"], a[href*="/permalink/"]',
+  // Author: h3 > a > b > span is the current structure
+  POST_AUTHOR: 'h3 a b span, h3 a',
 
-  // Author name
-  POST_AUTHOR: 'strong a, h2 a[href*="facebook.com"]',
-
-  // "See more" button that expands truncated text
-  SEE_MORE_BTN: 'div[role="button"]:has-text("See more")',
+  // "See more" buttons — queried separately per locale (has-text doesn't support comma lists)
+  SEE_MORE_BTNS: [
+    '[role="button"]:has-text("See more")',
+    '[role="button"]:has-text("Tumingin pa")',
+  ],
 }
 
 // ─── Timing ───────────────────────────────────────────────────────────────────
 
-/** Return a random delay in ms between min and max (inclusive). */
 function randomDelay(min = 1500, max = 4000) {
   return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+// ─── Shared launch options ────────────────────────────────────────────────────
+
+function makeLaunchOptions(locale = 'fil') {
+  return {
+    headless: false,
+    slowMo: 50,
+    viewport: { width: 1280, height: 900 },
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    locale,
+  }
+}
+
+// ─── Date parsing ─────────────────────────────────────────────────────────────
+// Facebook's aria-label date strings vary by locale and age of post:
+//   Filipino: "Mayo 14 nang 8:43 AM", "Abril 3, 2024 nang 10:15 AM"
+//   English:  "May 14 at 8:43 AM", "April 3, 2024 at 10:15 AM"
+// Posts from the current year omit the year — we infer it.
+
+const FIL_MONTHS = {
+  enero:1, pebrero:2, marso:3, abril:4, mayo:5, hunyo:6,
+  hulyo:7, agosto:8, setyembre:9, oktubre:10, nobyembre:11, disyembre:12,
+}
+const EN_MONTHS = {
+  january:1, february:2, march:3, april:4, may:5, june:6,
+  july:7, august:8, september:9, october:10, november:11, december:12,
+}
+
+function parseFacebookDate(raw) {
+  if (!raw) return null
+  // Normalize: collapse whitespace, lower
+  const s = raw.trim().toLowerCase().replace(/\s+/g, ' ')
+
+  // Relative dates: "5d", "3h", "45m", "2w" — resolve against today
+  const rel = s.match(/^(\d+)(m|h|d|w)$/)
+  if (rel) {
+    const n = parseInt(rel[1], 10)
+    const unit = rel[2]
+    const ms = { m: 60000, h: 3600000, d: 86400000, w: 604800000 }[unit]
+    const dt = new Date(Date.now() - n * ms)
+    const pad = x => String(x).padStart(2, '0')
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+  }
+
+  // Try to extract parts: month day [year] [at|nang] HH:MM AM/PM
+  // Patterns:
+  //   "mayo 14 nang 8:43 am"
+  //   "abril 3, 2024 nang 10:15 am"
+  //   "may 14 at 8:43 am"
+  //   "april 3, 2024 at 10:15 am"
+  // Match: "Month Day [Year] [nang|at HH:MM am/pm]"
+  const m = s.match(
+    /^([a-záéíóúñ]+)\s+(\d{1,2}),?\s*(?:(\d{4}))?\s*(?:(?:nang|at)\s+(\d{1,2}):(\d{2})\s*(am|pm))?/
+  )
+  if (!m) return null
+
+  const [, monthStr, dayStr, yearStr, hourStr, minStr, ampm] = m
+  const month = FIL_MONTHS[monthStr] ?? EN_MONTHS[monthStr]
+  if (!month) return null
+
+  const day  = parseInt(dayStr, 10)
+  const year = yearStr ? parseInt(yearStr, 10) : new Date().getFullYear()
+
+  const pad = n => String(n).padStart(2, '0')
+
+  if (!hourStr) {
+    // Date only — no time component
+    return `${year}-${pad(month)}-${pad(day)}`
+  }
+
+  let hour = parseInt(hourStr, 10)
+  const min = parseInt(minStr, 10)
+  if (ampm === 'pm' && hour !== 12) hour += 12
+  if (ampm === 'am' && hour === 12) hour = 0
+
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(min)}:00`
 }
 
 // ─── Adapter ──────────────────────────────────────────────────────────────────
@@ -105,188 +170,292 @@ export class FacebookAdapter extends BaseAdapter {
    * @returns {Promise<NormalizedPost[]>}
    */
   async scrape(pageConfig) {
-    // TODO: remove this throw and implement the sections below
-    throw new Error(
-      'FacebookAdapter is not yet implemented. ' +
-      'See TODO comments in src/adapters/facebook.adapter.js for implementation guide.'
-    )
+    // ── Section 1: Launch persistent browser context ──────────────────────────
+    // The UDD carries all cookies/localStorage across runs automatically.
+    // No storageState needed — launchPersistentContext doesn't support it.
+    mkdirSync(this._userDataDir, { recursive: true })
+    const context = await chromium.launchPersistentContext(this._userDataDir, makeLaunchOptions())
+    const page = await context.newPage()
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 1 — Launch persistent browser context
-     * ────────────────────────────────────────────────────────────────────────
-     * We use launchPersistentContext so that the Chromium User Data Directory
-     * (cookies, localStorage, IndexedDB) persists across sessions. This is how
-     * we maintain the Facebook login state without logging in every time.
-     *
-     * Reference: https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context
-     *
-     * TODO:
-     *   const context = await chromium.launchPersistentContext(this._userDataDir, {
-     *     headless: false,           // Facebook bot detection blocks headless mode
-     *     slowMo: 50,                // Mimic human typing/click speed
-     *     viewport: { width: 1280, height: 900 },
-     *     userAgent: '...',          // Use a realistic desktop UA string
-     *     locale: 'en-US',
-     *   })
-     *   const page = await context.newPage()
-     */
+    // Block images, video, audio, fonts, and tracking pixels to speed up page load.
+    // XHR/fetch (GraphQL) must remain unblocked — Facebook's feed data comes through them.
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType()
+      if (['image', 'media', 'font', 'other'].includes(type)) {
+        route.abort()
+      } else {
+        route.continue()
+      }
+    })
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 2 — Check login state / restore session
-     * ────────────────────────────────────────────────────────────────────────
-     * After launching, navigate to facebook.com and check if we are logged in.
-     * If not, pause and wait for manual login (or throw an error with instructions).
-     *
-     * Optionally, if a session JSON file exists, call:
-     *   await context.setStorageState(this._sessionFile)
-     * to restore previously saved cookies/localStorage.
-     *
-     * TODO:
-     *   await page.goto('https://www.facebook.com', { waitUntil: 'domcontentloaded' })
-     *   const isLoggedIn = await page.$('[aria-label="Your profile"]') !== null
-     *   if (!isLoggedIn) {
-     *     // Option A: Throw error asking user to run openLoginSession() first
-     *     throw new Error('Not logged in to Facebook. Run the session setup flow first.')
-     *     // Option B: Wait for manual login (set a long timeout)
-     *   }
-     */
+    try {
+      // ── Section 2 + 3: Navigate to target page ───────────────────────────────
+      // Navigate to the /posts tab
+      const postsUrl = pageConfig.url.replace(/\/?$/, '/posts')
+      await page.goto(postsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 3 — Navigate to the target page
-     * ────────────────────────────────────────────────────────────────────────
-     * TODO:
-     *   await page.goto(pageConfig.url, { waitUntil: 'networkidle', timeout: 30000 })
-     *   await page.waitForSelector(SELECTORS.POST_CONTAINER, { timeout: 15000 })
-     */
+      const landedUrl = page.url()
+      if (landedUrl.includes('/login') || landedUrl.includes('login.php')) {
+        throw Object.assign(
+          new Error('Not logged in to Facebook. Use "Set up Facebook Session" in the Jobs page to log in first.'),
+          { code: 'FB_NOT_LOGGED_IN' }
+        )
+      }
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 4 — Infinite scroll + post collection loop
-     * ────────────────────────────────────────────────────────────────────────
-     * Facebook loads posts lazily as the user scrolls. We must:
-     *   a) Scroll down, wait for new posts to load
-     *   b) Extract posts from the newly loaded DOM
-     *   c) Repeat until maxPosts or maxScrolls is reached, or no new posts appear
-     *
-     * TODO:
-     *   const { maxPosts = 100, maxScrolls = 30 } = pageConfig.options ?? {}
-     *   const seenIds = new Set()
-     *   let scrollCount = 0
-     *
-     *   while (seenIds.size < maxPosts && scrollCount < maxScrolls) {
-     *     // Expand any "See more" buttons before extracting text
-     *     const seeMoreBtns = await page.$$(SELECTORS.SEE_MORE_BTN)
-     *     for (const btn of seeMoreBtns) {
-     *       await btn.click().catch(() => {})  // ignore if already expanded
-     *       await page.waitForTimeout(300)
-     *     }
-     *
-     *     // Extract all visible post containers
-     *     const postEls = await page.$$(SELECTORS.POST_CONTAINER)
-     *     for (const el of postEls) {
-     *       const rawData = await extractPostData(page, el, pageConfig.pageId)
-     *       if (rawData && !seenIds.has(rawData.id)) {
-     *         seenIds.add(rawData.id)
-     *         posts.push(this.normalizePost(rawData))
-     *       }
-     *     }
-     *
-     *     // Scroll down
-     *     const prevHeight = await page.evaluate(() => document.body.scrollHeight)
-     *     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-     *     await page.waitForTimeout(randomDelay(1500, 4000))
-     *
-     *     // Check if more content loaded
-     *     const newHeight = await page.evaluate(() => document.body.scrollHeight)
-     *     if (newHeight === prevHeight) break  // no more content
-     *     scrollCount++
-     *   }
-     */
+      // Facebook's bot detection withholds post content from automated browsers.
+      // Wait up to 3 minutes for story_message to appear — the user can interact
+      // with the browser window (scroll, dismiss dialogs) to trigger rendering.
+      // Once posts appear the scraper takes over automatically.
+      await page.waitForSelector('[data-ad-rendering-role="story_message"]', { timeout: 180000 })
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 5 — Save updated session state
-     * ────────────────────────────────────────────────────────────────────────
-     * After a successful scrape, persist the latest cookies/localStorage so
-     * subsequent runs reuse the same session without re-authentication.
-     *
-     * Reference: https://playwright.dev/docs/auth#saving-authentication-state
-     *
-     * TODO:
-     *   await context.storageState({ path: this._sessionFile })
-     *   await context.close()
-     */
+      // ── Section 4: Infinite scroll + post collection loop ───────────────────
+      const {
+        maxPosts      = Infinity,
+        stopAfterDate = null,
+      } = pageConfig.options ?? {}
 
-    /* ────────────────────────────────────────────────────────────────────────
-     * SECTION 6 — Return normalised posts
-     * ────────────────────────────────────────────────────────────────────────
-     * TODO:
-     *   return posts
-     */
+      const stopDate = stopAfterDate ? new Date(stopAfterDate) : null
+      const seenIds = new Set()
+      const posts = []
+      let hitDateLimit = false
+
+      while (seenIds.size < maxPosts && !hitDateLimit) {
+        // Expand all "See more" / "Tumingin pa" buttons.
+        // Use page.evaluate to find and click them all in-browser — avoids
+        // Playwright's cross-process overhead and handles visibility correctly.
+        const expanded = await page.evaluate((seeMoreTexts) => {
+          const results = []
+          const allBtns = [...document.querySelectorAll('[role="button"]')]
+          for (const btn of allBtns) {
+            const text = btn.innerText?.trim()
+            if (seeMoreTexts.some(t => text === t)) {
+              btn.click()
+              results.push(text)
+            }
+          }
+          return results
+        }, ['See more', 'Tumingin pa'])
+        if (expanded.length > 0) await page.waitForTimeout(600)
+
+        // Extract all visible post containers — skip skeletons and comments
+        const postEls = await page.$$(SELECTORS.POST_CONTAINER)
+        for (const el of postEls) {
+          const rawData = await extractPostData(el, pageConfig.pageId)
+          if (!rawData || seenIds.has(rawData.id)) continue
+
+          // Date-based stop: if the post has a date and it's before our cutoff, stop
+          if (stopDate && rawData.date && new Date(rawData.date) < stopDate) {
+            hitDateLimit = true
+            break
+          }
+
+          seenIds.add(rawData.id)
+          posts.push(this.normalizePost(rawData))
+        }
+
+        if (hitDateLimit) break
+
+        // Scroll down and wait for new content to load
+        const prevHeight = await page.evaluate(() => document.body.scrollHeight)
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+
+        // Poll for height change — bail after 5s if nothing loads
+        const scrollTimeout = Date.now() + 5000
+        let newHeight = prevHeight
+        while (Date.now() < scrollTimeout) {
+          await page.waitForTimeout(500)
+          newHeight = await page.evaluate(() => document.body.scrollHeight)
+          if (newHeight > prevHeight) break
+        }
+
+        // Extra settle time for new posts to finish rendering
+        await page.waitForTimeout(randomDelay(800, 1500))
+
+        if (newHeight === prevHeight) break
+      }
+
+      // ── Section 5: Session persists in UDD automatically — nothing extra needed
+
+      // ── Section 6: Return normalised posts ──────────────────────────────────
+      return posts
+    } finally {
+      await context.close().catch(() => {})
+    }
   }
 
   // ── Public: session management ──────────────────────────────────────────────
 
   /**
    * Opens a visible browser window for manual Facebook login.
-   * After logging in, the user should call saveSession() (or it is called
-   * automatically when the window is closed, depending on implementation).
-   *
-   * TODO: implement this UI flow in the renderer (JobRunner page) with a
-   * "Set up Facebook session" button that calls this via IPC.
+   * Waits for the user to complete login, then saves the session to disk.
    */
   async openLoginSession() {
-    // TODO:
-    // const context = await chromium.launchPersistentContext(this._userDataDir, {
-    //   headless: false,
-    // })
-    // const page = await context.newPage()
-    // await page.goto('https://www.facebook.com/login')
-    // // Wait until user navigates away from login page (manual login complete)
-    // await page.waitForURL(url => !url.includes('/login'), { timeout: 120000 })
-    // await this.saveSession(context)
-    // await context.close()
-    throw new Error('openLoginSession() not yet implemented')
+    mkdirSync(this._userDataDir, { recursive: true })
+    const context = await chromium.launchPersistentContext(this._userDataDir, {
+      ...makeLaunchOptions(),
+      slowMo: 0,
+    })
+    const page = await context.newPage()
+    try {
+      await page.goto('https://www.facebook.com/login', { waitUntil: 'domcontentloaded' })
+
+      // Wait until the user is fully logged in — confirmed by landing on the home
+      // feed (facebook.com/ or facebook.com/home*). Captcha/checkpoint pages and
+      // the login page itself won't match, so we keep waiting.
+      await page.waitForURL(
+        (url) => {
+          const s = url.toString()
+          return (
+            (s.startsWith('https://www.facebook.com/') || s.startsWith('https://facebook.com/')) &&
+            !s.includes('/login') &&
+            !s.includes('/checkpoint') &&
+            !s.includes('/recover') &&
+            !s.includes('/help') &&
+            !s.includes('/two_step') &&
+            !s.includes('/confirmemail')
+          )
+        },
+        { timeout: 300000 } // 5 minutes — plenty of time for captcha + login
+      )
+
+      // Extra wait to ensure cookies are fully flushed to the UDD
+      await page.waitForTimeout(2000)
+
+      // Write sentinel file so sessionExists() knows login has been completed.
+      // The actual session lives in the UDD — launchPersistentContext persists it automatically.
+      mkdirSync(dirname(this._sessionFile), { recursive: true })
+      writeFileSync(this._sessionFile, JSON.stringify({ savedAt: new Date().toISOString() }))
+    } finally {
+      await context.close().catch(() => {})
+    }
   }
 
   /**
-   * Save the current browser session cookies/localStorage to disk.
-   * @param {import('playwright').BrowserContext} context
+   * Opens Facebook language settings in the persistent Playwright browser so the
+   * user can change their account language without leaving the app.
+   * The window stays open — the user closes it when done.
    */
-  async saveSession(context) {
-    // TODO:
-    // import { mkdirSync } from 'fs'
-    // mkdirSync(dirname(this._sessionFile), { recursive: true })
-    // await context.storageState({ path: this._sessionFile })
-    throw new Error('saveSession() not yet implemented')
+  async openLanguageSettings() {
+    mkdirSync(this._userDataDir, { recursive: true })
+    const context = await chromium.launchPersistentContext(this._userDataDir, {
+      ...makeLaunchOptions(),
+      slowMo: 0,
+    })
+    const page = await context.newPage()
+    await page.goto('https://www.facebook.com/settings?tab=language', {
+      waitUntil: 'domcontentloaded',
+    })
+    // Wait indefinitely — user closes the window when done
+    await page.waitForEvent('close', { timeout: 0 }).catch(() => {})
+    await context.close().catch(() => {})
   }
 }
 
 // ─── Private: extract post data from a DOM element ───────────────────────────
 
 /**
- * TODO: Implement this helper once SELECTORS are verified against live Facebook.
- *
  * Extracts raw data from a single post element. Called inside the scroll loop.
  *
- * @param {import('playwright').Page} _page
- * @param {import('playwright').ElementHandle} _el
- * @param {string} _pageId
+ * @param {import('playwright').ElementHandle} el  — the story_message element
+ * @param {string} pageId
  * @returns {Promise<object|null>}
  */
-async function extractPostData(_page, _el, _pageId) {
-  // TODO:
-  // const text    = await _el.$eval(SELECTORS.POST_TEXT, el => el.innerText).catch(() => '')
-  // const rawHtml = await _el.innerHTML()
-  // const href    = await _el.$eval(SELECTORS.POST_LINK, el => el.href).catch(() => null)
-  // const dateEl  = await _el.$(SELECTORS.POST_TIMESTAMP)
-  // const utime   = dateEl ? await dateEl.getAttribute('data-utime') : null
-  // const date    = utime ? new Date(parseInt(utime, 10) * 1000).toISOString() : null
-  // const author  = await _el.$eval(SELECTORS.POST_AUTHOR, el => el.innerText).catch(() => null)
-  //
-  // // Derive a stable post ID from the permalink
-  // const postIdMatch = href?.match(/\/(\d+)\/?$/)
-  // const nativeId    = postIdMatch ? postIdMatch[1] : href ?? String(Date.now())
-  // const id          = `facebook:${_pageId}:${nativeId}`
-  //
-  // return { id, platform: 'facebook', pageId: _pageId, text, hashtags: extractHashtags(text), date, url: href, author, rawHtml }
-  return null
+async function extractPostData(el, pageId) {
+  try {
+    // el is the story_message element — text lives directly inside it
+    const text    = await el.evaluate(node => node.innerText.trim()).catch(() => '')
+    const rawHtml = await el.innerHTML().catch(() => '')
+
+    // Permalink and date live in the post header, which is a sibling of story_message —
+    // not inside it. Use el.evaluate() so `node` is the live DOM element, then
+    // climb to the nearest [role="article"] ancestor via closest().
+    const { href, author, rawDate } = await el.evaluate((node) => {
+      // Facebook renders two different DOM structures depending on locale:
+      //   Filipino/some locales: role="article" wraps the whole post card
+      //   English/others:        no role="article"; uses data-ad-rendering-role siblings
+
+      // Strategy: find the post card container, then find the timestamp <a href*="/posts/">
+      // inside it. The date is either aria-label on the <a> itself (Filipino) or in the
+      // element pointed to by aria-labelledby on a child span (English).
+
+      // 1. Try role="article" first (Filipino and some locales)
+      let container = node.closest('[role="article"]')
+
+      // 2. Fall back: walk up to the first ancestor containing a /posts/ link,
+      //    but stop at the first ancestor that also has profile_name (post card boundary)
+      if (!container) {
+        let cur = node.parentElement
+        let boundary = null
+        while (cur) {
+          if (cur.querySelector('[data-ad-rendering-role="profile_name"]')) {
+            boundary = cur
+            break
+          }
+          cur = cur.parentElement
+        }
+        container = boundary
+      }
+
+      if (!container) return { href: null, author: null, date: null }
+
+      const allLinks = [...container.querySelectorAll('a[href]')]
+      const postLink = allLinks.find(a => /\/posts\/|\/permalink\/|\/reel\/|\/videos\//.test(a.href))
+      const href = postLink ? postLink.href.split('?')[0] : null
+
+      let date = null
+      if (postLink) {
+        // Filipino/simple: aria-label directly on the <a>
+        date = postLink.getAttribute('aria-label') ?? null
+
+        // English/scrambled: aria-labelledby on a child <span> points to a hidden element.
+        // Try both innerText and aria-label on the target element.
+        if (!date) {
+          const tsSpan = postLink.querySelector('[aria-labelledby]')
+          if (tsSpan) {
+            const labelEl = document.getElementById(tsSpan.getAttribute('aria-labelledby'))
+            if (labelEl) {
+              date = labelEl.getAttribute('aria-label')
+                  ?? labelEl.innerText?.trim()
+                  ?? null
+            }
+          }
+        }
+      }
+
+      const author = container.querySelector('[data-ad-rendering-role="profile_name"] h3 a b span, [data-ad-rendering-role="profile_name"] h3 a, h3 a b span, h3 a')?.innerText?.trim() ?? null
+
+      return { href, author, rawDate: date }
+    }).catch(() => ({ href: null, author: null, rawDate: null }))
+
+    const date = parseFacebookDate(rawDate)
+    if (rawDate && !date) console.log('[fb] unparsed date:', JSON.stringify(rawDate))
+    if (!href) console.log('[fb] no url, text snippet:', text.slice(0, 60))
+
+    // Derive stable ID: prefer permalink slug, fall back to a hash of the text
+    const pfbidMatch   = href?.match(/\/posts\/(pfbid[A-Za-z0-9]+)/)
+    const numericMatch = href?.match(/\/(?:posts|reel|videos)\/(\d+)/)
+    let nativeId = pfbidMatch?.[1] ?? numericMatch?.[1]
+    if (!nativeId) {
+      let h = 5381
+      for (let i = 0; i < Math.min(text.length, 200); i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0
+      nativeId = h.toString(36)
+    }
+    const id = `facebook:${pageId}:${nativeId}`
+
+    if (!text && !rawHtml) return null
+
+    return {
+      id,
+      platform: 'facebook',
+      pageId,
+      text,
+      hashtags: extractHashtags(text),
+      date,
+      url:    href,
+      author,
+      rawHtml,
+    }
+  } catch {
+    return null
+  }
 }

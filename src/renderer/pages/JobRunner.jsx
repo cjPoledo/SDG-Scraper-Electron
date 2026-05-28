@@ -123,6 +123,16 @@ export default function JobRunner() {
   const [error, setError]               = useState(null)
   const [activeJob, setActiveJob]       = useState(null)
 
+  // ── Scrape options ──────────────────────────────────────────────────────────
+  const [showOptions, setShowOptions]   = useState(false)
+  const [optMaxPosts, setOptMaxPosts]   = useState('')
+  const [optStopDate, setOptStopDate]   = useState('')
+
+  // ── Facebook session state ──────────────────────────────────────────────────
+  const [fbSessionOk, setFbSessionOk]           = useState(null) // null = unknown
+  const [settingUpSession, setSettingUpSession] = useState(false)
+  const [sessionError, setSessionError]         = useState(null)
+
   // ── Load data ───────────────────────────────────────────────────────────────
 
   // Stable ref so the progress handler can call loadJobs without being a dep
@@ -166,6 +176,39 @@ export default function JobRunner() {
     loadData()
   }, [loadData])
 
+  // ── Check Facebook session when selected page changes ──────────────────────
+
+  const selectedPlatform = pages.find(p => String(p.id) === selectedPage)?.platform
+
+  useEffect(() => {
+    if (selectedPlatform !== 'facebook') {
+      setFbSessionOk(null)
+      setSessionError(null)
+      return
+    }
+    let cancelled = false
+    window.api.facebook.sessionExists().then(ok => {
+      if (!cancelled) setFbSessionOk(ok)
+    }).catch(() => {
+      if (!cancelled) setFbSessionOk(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedPage, selectedPlatform])
+
+  async function handleSetupSession() {
+    setSettingUpSession(true)
+    setSessionError(null)
+    try {
+      await window.api.facebook.setupSession()
+      setFbSessionOk(true)
+    } catch (e) {
+      setSessionError(`Session setup failed: ${e.message}`)
+      setFbSessionOk(false)
+    } finally {
+      setSettingUpSession(false)
+    }
+  }
+
   // ── Subscribe to progress events (once on mount, never re-subscribes) ──────
 
   useEffect(() => {
@@ -206,7 +249,11 @@ export default function JobRunner() {
     setStarting(true)
 
     try {
-      const { jobId } = await window.api.jobs.start(Number(selectedPage))
+      const options = {}
+      if (optMaxPosts) options.maxPosts      = Number(optMaxPosts)
+      if (optStopDate) options.stopAfterDate = optStopDate
+
+      const { jobId } = await window.api.jobs.start(Number(selectedPage), options)
       setActiveJob({ jobId, status: 'running', message: 'Starting…', postsFound: 0 })
       // Reload so the new job row appears in the table immediately
       await loadJobs()
@@ -238,6 +285,8 @@ export default function JobRunner() {
 
   const hasActiveJob = activeJob &&
     (activeJob.status === 'running' || activeJob.status === 'tagging')
+
+  const fbSessionBlocking = selectedPlatform === 'facebook' && fbSessionOk === false
 
   return (
     <div className="p-6">
@@ -281,9 +330,19 @@ export default function JobRunner() {
               </div>
 
               <button
+                type="button"
+                className="btn text-xs text-slate-400 border border-slate-700 hover:border-slate-500 px-3 py-2"
+                onClick={() => setShowOptions(v => !v)}
+                disabled={hasActiveJob}
+                title="Scrape options"
+              >
+                {showOptions ? '▲ Options' : '▼ Options'}
+              </button>
+
+              <button
                 type="submit"
                 className="btn-primary"
-                disabled={starting || hasActiveJob || loading || !selectedPage}
+                disabled={starting || hasActiveJob || loading || !selectedPage || fbSessionBlocking}
                 aria-busy={starting || hasActiveJob}
               >
                 {starting ? (
@@ -293,7 +352,103 @@ export default function JobRunner() {
                 ) : '▶ Start Scrape'}
               </button>
             </div>
+
+            {showOptions && (
+              <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Max posts <span className="text-slate-600">(leave blank for unlimited)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="input"
+                    placeholder="Unlimited"
+                    value={optMaxPosts}
+                    onChange={e => setOptMaxPosts(e.target.value)}
+                    disabled={hasActiveJob}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    Stop after date <span className="text-slate-600">(skip posts older than this)</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={optStopDate}
+                    onChange={e => setOptStopDate(e.target.value)}
+                    disabled={hasActiveJob}
+                  />
+                </div>
+              </div>
+            )}
           </form>
+        )}
+
+        {/* Facebook session banner */}
+        {selectedPlatform === 'facebook' && fbSessionOk === false && (
+          <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-900/10 p-4">
+            <p className="text-sm text-amber-300 mb-3">
+              No Facebook session found. Log in once to enable scraping.
+            </p>
+            <button
+              type="button"
+              className="btn-primary text-sm"
+              onClick={handleSetupSession}
+              disabled={settingUpSession}
+              aria-busy={settingUpSession}
+            >
+              {settingUpSession
+                ? <span className="flex items-center gap-1.5"><Spinner /> Opening browser…</span>
+                : 'Set up Facebook Session'}
+            </button>
+            {sessionError && (
+              <p className="mt-2 text-xs text-red-400" role="alert">{sessionError}</p>
+            )}
+          </div>
+        )}
+
+        {selectedPlatform === 'facebook' && fbSessionOk === true && (
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-xs text-green-400">
+                <span>●</span> Session active
+              </span>
+              <button
+                type="button"
+                className="btn btn-danger text-xs px-2 py-0.5"
+                disabled={hasActiveJob}
+                onClick={async () => {
+                  if (!window.confirm('Delete the Facebook session? You will need to log in again.')) return
+                  await window.api.facebook.deleteSession()
+                  setFbSessionOk(false)
+                }}
+              >
+                Delete Session
+              </button>
+            </div>
+            <p className="text-xs text-slate-600">
+              For best results, set your Facebook account language to Filipino (Pilipino).{' '}
+              <button
+                type="button"
+                className="text-blue-500 hover:text-blue-400 underline bg-transparent border-0 p-0 cursor-pointer text-xs"
+                onClick={() => window.api.facebook.openLanguageSettings()}
+                disabled={hasActiveJob}
+              >
+                Open Facebook Language Settings
+              </button>
+            </p>
+          </div>
+        )}
+
+          {/* Facebook browser hint — shown while a Facebook scrape is running */}
+        {activeJob &&
+         (activeJob.status === 'running' || activeJob.status === 'tagging') &&
+         selectedPlatform === 'facebook' && (
+          <div className="mt-3 rounded border border-blue-700/30 bg-blue-900/10 px-3 py-2 text-xs text-blue-300">
+            A browser window is open. If posts don't load automatically, scroll down in it to trigger rendering.
+          </div>
         )}
 
         {/* Active job progress card */}
