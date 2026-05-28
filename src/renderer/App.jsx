@@ -6,6 +6,7 @@
  */
 
 import { HashRouter, NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import sdgIcon from './assets/icon.png'
 import Dashboard   from './pages/Dashboard.jsx'
 import PageManager from './pages/PageManager.jsx'
 import JobRunner   from './pages/JobRunner.jsx'
@@ -57,7 +58,7 @@ function IconHelp({ className = 'w-4 h-4' }) {
 function IconSDG({ className = 'w-5 h-5' }) {
   return (
     <img
-      src="/icon.png"
+      src={sdgIcon}
       alt="SDG Scraper"
       className={className}
       style={{ objectFit: 'contain' }}
