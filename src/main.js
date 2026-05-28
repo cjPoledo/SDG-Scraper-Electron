@@ -1,3 +1,8 @@
+// Tell Playwright to resolve browser binaries relative to playwright-core inside
+// node_modules — works both in dev and in the packaged app (asarUnpack ensures
+// the .local-browsers dir is a real directory, not inside the asar archive).
+process.env.PLAYWRIGHT_BROWSERS_PATH = '0'
+
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, existsSync } from 'fs'

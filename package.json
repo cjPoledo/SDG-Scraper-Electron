@@ -10,7 +10,8 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder -w",
     "dist:mac": "npm run build && electron-builder -m",
-    "rebuild": "electron-rebuild -f -w better-sqlite3"
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "playwright install chromium"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
@@ -39,7 +40,8 @@
       "buildResources": "resources"
     },
     "asarUnpack": [
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/playwright-core/.local-browsers/**/*"
     ],
     "npmRebuild": true,
     "win": {
