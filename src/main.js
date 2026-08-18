@@ -3,7 +3,7 @@
 // the .local-browsers dir is a real directory, not inside the asar archive).
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0'
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, existsSync } from 'fs'
 import { openDb } from './storage/db.js'
@@ -44,6 +44,23 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Electron doesn't show a native Cut/Copy/Paste menu on right-click by default —
+  // build one from the editFlags Chromium reports for whatever was right-clicked.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return
+
+    Menu.buildFromTemplate([
+      { role: 'undo', enabled: params.editFlags.canUndo },
+      { role: 'redo', enabled: params.editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: params.editFlags.canSelectAll },
+    ]).popup({ window: mainWindow })
   })
 
   mainWindow.once('ready-to-show', () => {
