@@ -7,7 +7,10 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, existsSync } from 'fs'
 import { openDb } from './storage/db.js'
-import { registerIpcHandlers } from './ipc/handlers.js'
+// Loaded dynamically (not statically) because this module's import graph reaches
+// playwright (via scraper/manager.js -> adapters/*.adapter.js). A static import
+// here would be hoisted and evaluated before PLAYWRIGHT_BROWSERS_PATH is set above,
+// so playwright-core would lock in the OS-wide cache path instead of .local-browsers.
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 let mainWindow = null
@@ -94,7 +97,7 @@ function bootstrapKeywords() {
 }
 
 // ─── App lifecycle ───────────────────────────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Ensure keywords.xlsx is in the user-writable userData folder
   bootstrapKeywords()
 
@@ -102,6 +105,8 @@ app.whenReady().then(() => {
   db = openDb()
 
   createWindow()
+
+  const { registerIpcHandlers } = await import('./ipc/handlers.js')
 
   // Pass a getter so handlers always reference the current window,
   // even if it is recreated later (macOS activate).
