@@ -1,7 +1,8 @@
-// Installs Chromium into node_modules/playwright-core/.local-browsers so it can be
-// asarUnpacked and shipped inside the packaged app. Runs on `npm install` and again
-// right before every `electron-builder` invocation, so a stale/missing .local-browsers
-// (e.g. left over from a Playwright install that used the OS-wide cache instead) can
+// Installs Chromium into node_modules/playwright-core/.local-browsers, which
+// electron-builder's extraResources config copies to resources/chromium in the
+// packaged app (see package.json). Runs on `npm install` and again right before
+// every `electron-builder` invocation, so a stale/missing .local-browsers (e.g.
+// left over from a Playwright install that used the OS-wide cache instead) can
 // never silently produce an installer that has no browser to launch.
 process.env.PLAYWRIGHT_BROWSERS_PATH = '0'
 

@@ -1,16 +1,19 @@
-// Tell Playwright to resolve browser binaries relative to playwright-core inside
-// node_modules — works both in dev and in the packaged app (asarUnpack ensures
-// the .local-browsers dir is a real directory, not inside the asar archive).
-process.env.PLAYWRIGHT_BROWSERS_PATH = '0'
-
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { copyFileSync, existsSync } from 'fs'
 import { openDb } from './storage/db.js'
-// Loaded dynamically (not statically) because this module's import graph reaches
-// playwright (via scraper/manager.js -> adapters/*.adapter.js). A static import
-// here would be hoisted and evaluated before PLAYWRIGHT_BROWSERS_PATH is set above,
-// so playwright-core would lock in the OS-wide cache path instead of .local-browsers.
+
+// Tell Playwright where to find Chromium. In dev it's downloaded to
+// node_modules/playwright-core/.local-browsers ('0' is Playwright's shorthand for
+// that path). In the packaged app it's copied by electron-builder's extraResources
+// into resources/chromium, next to app.asar (not inside it — asar entries can't be
+// executed as binaries). Must run before ipc/handlers.js is loaded, since that's
+// where the import graph first reaches playwright (via scraper/manager.js ->
+// adapters/*.adapter.js) and playwright-core reads this env var once, at that
+// first import, to pick its browser registry directory.
+process.env.PLAYWRIGHT_BROWSERS_PATH = app.isPackaged
+  ? join(process.resourcesPath, 'chromium')
+  : '0'
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 let mainWindow = null

@@ -41,8 +41,16 @@
       "buildResources": "resources"
     },
     "asarUnpack": [
-      "node_modules/better-sqlite3/**/*",
-      "node_modules/playwright-core/.local-browsers/**/*"
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/playwright-core/.local-browsers",
+        "to": "chromium",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "npmRebuild": true,
     "win": {
