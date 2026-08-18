@@ -54,18 +54,50 @@ const SELECTORS = {
 
   // Author: h3 > a > b > span is the current structure
   POST_AUTHOR: 'h3 a b span, h3 a',
-
-  // "See more" buttons — queried separately per locale (has-text doesn't support comma lists)
-  SEE_MORE_BTNS: [
-    '[role="button"]:has-text("See more")',
-    '[role="button"]:has-text("Tumingin pa")',
-  ],
 }
+
+// "See more" / expander button labels, by locale. Matched case-insensitively
+// against trimmed innerText — exact-match only (loose substring matching risks
+// clicking unrelated buttons like "See more comments" or "See more reactions").
+// Add locales here as they're encountered; unmatched locales silently leave
+// truncated post text, so extend this list rather than loosening the match.
+const SEE_MORE_LABELS = [
+  'see more',      // English
+  'tumingin pa',   // Filipino
+]
 
 // ─── Timing ───────────────────────────────────────────────────────────────────
 
 function randomDelay(min = 1500, max = 4000) {
   return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+// Repeatedly clicks every visible "See more" style expander button until a
+// pass finds none left — a single pass can miss buttons revealed by an
+// earlier click (e.g. a truncated shared post nested inside a truncated
+// post). Capped to avoid ever looping indefinitely on a rendering glitch.
+// Returns the total number of buttons clicked across all passes.
+async function expandSeeMoreButtons(page, maxPasses = 10) {
+  let total = 0
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const clicked = await page.evaluate((labels) => {
+      const results = []
+      const allBtns = [...document.querySelectorAll('[role="button"]')]
+      for (const btn of allBtns) {
+        const text = btn.innerText?.trim().toLowerCase()
+        if (text && labels.includes(text)) {
+          btn.click()
+          results.push(text)
+        }
+      }
+      return results.length
+    }, SEE_MORE_LABELS)
+
+    if (clicked === 0) break
+    total += clicked
+    await page.waitForTimeout(600)
+  }
+  return total
 }
 
 // Playwright throws these when the user closes the browser window mid-scrape.
@@ -249,27 +281,24 @@ export class FacebookAdapter extends BaseAdapter {
       let hitDateLimit = false
       let closedEarly = false
 
+      // Consecutive iterations where NEITHER signal moved — only then do we
+      // conclude the feed is exhausted. Facebook virtualizes off-screen posts
+      // (removes them from the DOM), so scrollHeight can plateau for a beat
+      // while new posts are still being appended below the fold; requiring
+      // both signals to be flat, twice in a row, avoids stopping early on that.
+      let staleRounds = 0
+      const STALE_ROUNDS_LIMIT = 2
+
       while (seenIds.size < maxPosts && !hitDateLimit) {
         try {
-          // Expand all "See more" / "Tumingin pa" buttons.
-          // Use page.evaluate to find and click them all in-browser — avoids
-          // Playwright's cross-process overhead and handles visibility correctly.
-          const expanded = await page.evaluate((seeMoreTexts) => {
-            const results = []
-            const allBtns = [...document.querySelectorAll('[role="button"]')]
-            for (const btn of allBtns) {
-              const text = btn.innerText?.trim()
-              if (seeMoreTexts.some(t => text === t)) {
-                btn.click()
-                results.push(text)
-              }
-            }
-            return results
-          }, ['See more', 'Tumingin pa'])
-          if (expanded.length > 0) await page.waitForTimeout(600)
+          // Expand every "See more" button, re-querying after each pass — a click
+          // can itself reveal a further-nested "See more" (e.g. a truncated shared
+          // post inside a truncated post), so a single pass can miss them.
+          const expandedTotal = await expandSeeMoreButtons(page)
 
           // Extract all visible post containers — skip skeletons and comments
           const postEls = await page.$$(SELECTORS.POST_CONTAINER)
+          const postsBefore = posts.length
           for (const el of postEls) {
             const rawData = await extractPostData(el, pageConfig.pageId)
             if (!rawData || seenIds.has(rawData.id)) continue
@@ -285,6 +314,8 @@ export class FacebookAdapter extends BaseAdapter {
           }
 
           if (hitDateLimit) break
+
+          const newPostsFound = posts.length > postsBefore
 
           // Scroll down and wait for new content to load
           const prevHeight = await page.evaluate(() => document.body.scrollHeight)
@@ -302,7 +333,17 @@ export class FacebookAdapter extends BaseAdapter {
           // Extra settle time for new posts to finish rendering
           await page.waitForTimeout(randomDelay(800, 1500))
 
-          if (newHeight === prevHeight) break
+          const heightGrew = newHeight > prevHeight
+
+          // Stop only once BOTH signals (scroll height, new posts captured) are
+          // flat for STALE_ROUNDS_LIMIT consecutive rounds — a single flat
+          // round can just mean content was still hydrating or expanding.
+          if (!heightGrew && !newPostsFound && expandedTotal === 0) {
+            staleRounds++
+            if (staleRounds >= STALE_ROUNDS_LIMIT) break
+          } else {
+            staleRounds = 0
+          }
         } catch (err) {
           // User closed the browser window mid-scrape — finalize with whatever
           // posts were already collected instead of losing them to the exception.
