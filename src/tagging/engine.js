@@ -4,7 +4,9 @@
  * SDG tagging engine. Accepts a normalised post and returns an array of SDG
  * tag objects, each with a confidence level.
  *
- * Matching order (as specified in CLAUDE.md):
+ * Matching order (as specified in CLAUDE.md, extended with a taxonomy pass):
+ *   0. Taxonomy matching — confidence: 'taxonomy' (post.sdgTaxonomy, when a
+ *      source exposes an editorially-curated SDG taxonomy/field)
  *   1. Hashtag matching  — confidence: 'hashtag'
  *   2. Keyword matching  — confidence: 'keyword' (skips SDGs already matched)
  *
@@ -57,16 +59,15 @@ function buildHashtagVariants() {
     const n = sdg.number
     const pad = String(n).padStart(2, '0')
 
+    const prefixes = ['sdg', 'unsdg', 'upxsdg']
+
     const variants = [
       // Number-only forms
-      `sdg${n}`,
-      `sdg${pad}`,
-      `unsdg${n}`,
-      `unsdg${pad}`,
+      ...prefixes.map((p) => `${p}${n}`),
+      ...prefixes.map((p) => `${p}${pad}`),
 
       // Number + full slug
-      `sdg${n}${sdg.slug}`,
-      `unsdg${n}${sdg.slug}`,
+      ...prefixes.map((p) => `${p}${n}${sdg.slug}`),
 
       // Slug alone
       sdg.slug,
@@ -75,10 +76,8 @@ function buildHashtagVariants() {
       ...sdg.abbreviations,
 
       // Number + each abbreviation
-      ...sdg.abbreviations.map((a) => `sdg${n}${a}`),
-      ...sdg.abbreviations.map((a) => `unsdg${n}${a}`),
-      ...sdg.abbreviations.map((a) => `sdg${pad}${a}`),
-      ...sdg.abbreviations.map((a) => `unsdg${pad}${a}`),
+      ...prefixes.flatMap((p) => sdg.abbreviations.map((a) => `${p}${n}${a}`)),
+      ...prefixes.flatMap((p) => sdg.abbreviations.map((a) => `${p}${pad}${a}`)),
     ]
 
     for (const v of variants) {
@@ -133,12 +132,24 @@ export function buildEngine(keywordMap, options = {}) {
    *
    * @param {object} post  Normalised post object
    * @returns {Promise<TagResult[]>}
-   *   Each result: { sdgNumber: number, confidence: 'hashtag'|'keyword'|'ai', matchedOn: string }
+   *   Each result: { sdgNumber: number, confidence: 'taxonomy'|'hashtag'|'keyword'|'ai', matchedOn: string }
    */
   async function tagPost(post) {
     /** @type {Array<{ sdgNumber: number, confidence: string, matchedOn: string }>} */
     const results = []
     const taggedSdgs = new Set()
+
+    // ── 0. Taxonomy pass ───────────────────────────────────────────────────
+    // Some sources expose an editorially-curated, platform-native SDG taxonomy
+    // (see base.adapter.js). A human explicitly assigned these, so they outrank
+    // hashtag/keyword matches.
+    const sdgTaxonomy = Array.isArray(post.sdgTaxonomy) ? post.sdgTaxonomy : []
+    for (const sdgNumber of sdgTaxonomy) {
+      if (!taggedSdgs.has(sdgNumber)) {
+        results.push({ sdgNumber, confidence: 'taxonomy', matchedOn: `sdg-${sdgNumber}` })
+        taggedSdgs.add(sdgNumber)
+      }
+    }
 
     // ── 1. Hashtag pass ────────────────────────────────────────────────────
     const hashtags = Array.isArray(post.hashtags) ? post.hashtags : []

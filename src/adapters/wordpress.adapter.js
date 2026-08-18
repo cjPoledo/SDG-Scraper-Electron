@@ -78,6 +78,12 @@ export class WordPressAdapter extends BaseAdapter {
       headers['Authorization'] = `Basic ${btoa(`${username}:${password}`)}`
     }
 
+    // Fetched once per scrape (not per post) — see helper docs below.
+    const [tagNames, sdgTaxonomyNumbers] = await Promise.all([
+      this._fetchTagNames(base, headers),
+      this._fetchSdgTaxonomyNumbers(base, headers),
+    ])
+
     const posts = []
     let page = 1
     let totalPages = null
@@ -90,7 +96,7 @@ export class WordPressAdapter extends BaseAdapter {
         `${base}/wp-json/wp/v2/posts` +
         `?per_page=${perPage}` +
         `&page=${page}` +
-        `&_fields=id,date,link,content,excerpt,author,tags,categories,status` +
+        `&_fields=id,date,link,content,excerpt,author,tags,categories,status,sdg` +
         `&orderby=date&order=desc`
 
       let res
@@ -133,17 +139,32 @@ export class WordPressAdapter extends BaseAdapter {
         const text = stripHtml(
           wpPost.content?.rendered ?? wpPost.excerpt?.rendered ?? ''
         )
+
+        // Merge hashtags found in the body with tag names resolved from the
+        // post_tag taxonomy (e.g. "#SDG4_QualityEducation", "#UPxSDG4") —
+        // many WordPress sites assign SDG hashtags as tags, not in the text.
+        const bodyHashtags = extractHashtags(text)
+        const tagHashtags = (wpPost.tags ?? [])
+          .map((id) => tagNames.get(id))
+          .filter(Boolean)
+        const hashtags = [...new Set([...bodyHashtags, ...tagHashtags])]
+
+        const sdgTaxonomy = sdgTaxonomyNumbers
+          ? (wpPost.sdg ?? []).map((id) => sdgTaxonomyNumbers.get(id)).filter((n) => n != null)
+          : []
+
         posts.push(
           this.normalizePost({
             id:       `wordpress:${pageConfig.pageId}:${wpPost.id}`,
             platform: 'wordpress',
             pageId:   pageConfig.pageId,
             text,
-            hashtags: extractHashtags(text),
+            hashtags,
             date:     wpPost.date ?? null,           // ISO-8601 from WP
             url:      wpPost.link ?? null,
             author:   wpPost.author != null ? String(wpPost.author) : null,
             rawHtml:  wpPost.content?.rendered ?? null,
+            sdgTaxonomy,
           })
         )
       }
@@ -155,6 +176,84 @@ export class WordPressAdapter extends BaseAdapter {
     }
 
     return posts
+  }
+
+  // ── Taxonomy resolution helpers ─────────────────────────────────────────────
+
+  /**
+   * Fetch every post_tag term once and return id → "#Name" (with a leading #,
+   * as they'd appear if the site owner had typed them as hashtags — so they
+   * flow through the same hashtag-matching logic in tagging/engine.js).
+   *
+   * @param {string} base     Site root URL, no trailing slash
+   * @param {object} headers  Request headers (auth, Accept)
+   * @returns {Promise<Map<number, string>>}
+   */
+  async _fetchTagNames(base, headers) {
+    const names = new Map()
+    let page = 1
+
+    while (true) {
+      const res = await fetch(
+        `${base}/wp-json/wp/v2/tags?per_page=100&page=${page}&_fields=id,name`,
+        { headers }
+      )
+      if (!res.ok) break // no post_tag taxonomy, or site doesn't expose it — not fatal
+
+      const batch = await res.json()
+      if (!Array.isArray(batch) || batch.length === 0) break
+
+      for (const tag of batch) {
+        const name = tag.name?.startsWith('#') ? tag.name : `#${tag.name}`
+        names.set(tag.id, name)
+      }
+
+      const totalPages = parseInt(res.headers.get('X-WP-TotalPages') ?? '1', 10)
+      if (page >= totalPages || batch.length < 100) break
+      page++
+    }
+
+    return names
+  }
+
+  /**
+   * Some WordPress sites register a dedicated "sdg" taxonomy (distinct from
+   * post_tag/category) with terms like "SDG 4: Quality Education", slug
+   * "sdg-4-quality-education". Returns null if the site has no such taxonomy
+   * (a 404 here is expected and not an error), otherwise a
+   * Map<termId, sdgNumber> parsed from each term's slug.
+   *
+   * @param {string} base
+   * @param {object} headers
+   * @returns {Promise<Map<number, number> | null>}
+   */
+  async _fetchSdgTaxonomyNumbers(base, headers) {
+    const numbers = new Map()
+    let page = 1
+    let found = false
+
+    while (true) {
+      const res = await fetch(
+        `${base}/wp-json/wp/v2/sdg?per_page=100&page=${page}&_fields=id,slug`,
+        { headers }
+      )
+      if (!res.ok) break // no "sdg" taxonomy registered on this site
+
+      const batch = await res.json()
+      if (!Array.isArray(batch) || batch.length === 0) break
+      found = true
+
+      for (const term of batch) {
+        const match = /^sdg-(\d+)-/.exec(term.slug ?? '')
+        if (match) numbers.set(term.id, parseInt(match[1], 10))
+      }
+
+      const totalPages = parseInt(res.headers.get('X-WP-TotalPages') ?? '1', 10)
+      if (page >= totalPages || batch.length < 100) break
+      page++
+    }
+
+    return found ? numbers : null
   }
 
   // ── Playwright fallback (stub) ──────────────────────────────────────────────

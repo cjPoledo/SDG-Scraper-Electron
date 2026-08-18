@@ -17,6 +17,7 @@ import { app } from 'electron'
 // Ordered list of migration files. Add new entries here for future migrations.
 const MIGRATIONS = [
   { version: 1, file: '001_initial.sql' },
+  { version: 2, file: '002_taxonomy_confidence.sql' },
 ]
 
 /**

@@ -9,15 +9,18 @@
  *
  * Normalised post schema:
  *   {
- *     id       : string   — globally unique: '{platform}:{pageId}:{nativePostId}'
- *     platform : string   — 'facebook' | 'wordpress' | ...
- *     pageId   : string   — platform page identifier
- *     text     : string   — cleaned plain-text post body
- *     hashtags : string[] — extracted hashtags (with or without leading #)
- *     date     : string   — ISO-8601 datetime or null
- *     url      : string   — permalink or null
- *     author   : string   — display name or user id or null
- *     rawHtml  : string   — original HTML blob or null
+ *     id           : string   — globally unique: '{platform}:{pageId}:{nativePostId}'
+ *     platform     : string   — 'facebook' | 'wordpress' | ...
+ *     pageId       : string   — platform page identifier
+ *     text         : string   — cleaned plain-text post body
+ *     hashtags     : string[] — extracted hashtags (with or without leading #)
+ *     date         : string   — ISO-8601 datetime or null
+ *     url          : string   — permalink or null
+ *     author       : string   — display name or user id or null
+ *     rawHtml      : string   — original HTML blob or null
+ *     sdgTaxonomy  : number[] — SDG numbers from a platform-native taxonomy/field
+ *                               (e.g. a WordPress "sdg" taxonomy), when the source
+ *                               exposes one. Empty array if the platform has none.
  *   }
  */
 
@@ -53,7 +56,7 @@ export class BaseAdapter {
    * @param {object} fields
    * @returns {NormalizedPost}
    */
-  normalizePost({ id, platform, pageId, text, hashtags, date, url, author, rawHtml }) {
+  normalizePost({ id, platform, pageId, text, hashtags, date, url, author, rawHtml, sdgTaxonomy }) {
     if (!id)       throw new Error('normalizePost: id is required')
     if (!platform) throw new Error('normalizePost: platform is required')
     if (!pageId)   throw new Error('normalizePost: pageId is required')
@@ -62,12 +65,13 @@ export class BaseAdapter {
       id,
       platform,
       pageId,
-      text:     typeof text === 'string' ? text.trim() : '',
-      hashtags: Array.isArray(hashtags) ? hashtags : extractHashtags(text ?? ''),
-      date:     date ?? null,
-      url:      url ?? null,
-      author:   author != null ? String(author) : null,
-      rawHtml:  rawHtml ?? null,
+      text:        typeof text === 'string' ? text.trim() : '',
+      hashtags:    Array.isArray(hashtags) ? hashtags : extractHashtags(text ?? ''),
+      date:        date ?? null,
+      url:         url ?? null,
+      author:      author != null ? String(author) : null,
+      rawHtml:     rawHtml ?? null,
+      sdgTaxonomy: Array.isArray(sdgTaxonomy) ? sdgTaxonomy : [],
     }
   }
 }
