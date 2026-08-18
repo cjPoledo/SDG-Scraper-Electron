@@ -10,9 +10,9 @@ const { existsSync, readdirSync } = require('fs')
 const { join } = require('path')
 
 execFileSync(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
+  'npx',
   ['playwright', 'install', 'chromium'],
-  { stdio: 'inherit', env: process.env }
+  { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' }
 )
 
 const localBrowsersDir = join(__dirname, '..', 'node_modules', 'playwright-core', '.local-browsers')
