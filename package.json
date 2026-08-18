@@ -4,9 +4,9 @@
   "description": "Desktop app for scraping and SDG-tagging social media posts",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node ./scripts/run-electron.js electron-vite dev",
     "build": "electron-vite build",
-    "pack": "electron-builder --publish never",
+    "pack": "node ./scripts/run-electron.js electron-builder --publish never",
     "dist": "npm run build && npm run ensure:chromium && electron-builder",
     "dist:win": "npm run build && npm run ensure:chromium && electron-builder -w",
     "dist:mac": "npm run build && npm run ensure:chromium && electron-builder -m",
