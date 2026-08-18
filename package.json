@@ -7,11 +7,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "pack": "electron-builder --publish never",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder -w",
-    "dist:mac": "npm run build && electron-builder -m",
+    "dist": "npm run build && npm run ensure:chromium && electron-builder",
+    "dist:win": "npm run build && npm run ensure:chromium && electron-builder -w",
+    "dist:mac": "npm run build && npm run ensure:chromium && electron-builder -m",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "postinstall": "playwright install chromium"
+    "ensure:chromium": "node ./scripts/ensure-chromium.js",
+    "postinstall": "node ./scripts/ensure-chromium.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
