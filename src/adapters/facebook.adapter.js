@@ -68,6 +68,11 @@ function randomDelay(min = 1500, max = 4000) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+// Playwright throws these when the user closes the browser window mid-scrape.
+function isTargetClosedError(err) {
+  return /target (page|closed)|has been closed/i.test(err?.message ?? '')
+}
+
 // ─── Shared launch options ────────────────────────────────────────────────────
 
 function makeLaunchOptions(locale = 'fil') {
@@ -153,6 +158,10 @@ export class FacebookAdapter extends BaseAdapter {
     super(config)
     this._userDataDir = join(app.getPath('userData'), 'sessions', 'facebook')
     this._sessionFile = join(app.getPath('userData'), 'sessions', 'facebook-session.json')
+    // Set after scrape() resolves — lets the caller (ScraperManager) tell whether
+    // the returned posts are a full result or a partial one cut short by the user
+    // closing the browser window mid-scrape.
+    this.lastScrapeMeta = { partial: false }
   }
 
   // ── Public: scrape ──────────────────────────────────────────────────────────
@@ -170,6 +179,8 @@ export class FacebookAdapter extends BaseAdapter {
    * @returns {Promise<NormalizedPost[]>}
    */
   async scrape(pageConfig) {
+    this.lastScrapeMeta = { partial: false }
+
     // ── Section 1: Launch persistent browser context ──────────────────────────
     // The UDD carries all cookies/localStorage across runs automatically.
     // No storageState needed — launchPersistentContext doesn't support it.
@@ -192,7 +203,17 @@ export class FacebookAdapter extends BaseAdapter {
       // ── Section 2 + 3: Navigate to target page ───────────────────────────────
       // Navigate to the /posts tab
       const postsUrl = pageConfig.url.replace(/\/?$/, '/posts')
-      await page.goto(postsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      try {
+        await page.goto(postsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      } catch (err) {
+        // Window closed before the page even loaded — nothing was collected,
+        // but still resolve as a (partial, empty) result rather than erroring.
+        if (isTargetClosedError(err)) {
+          this.lastScrapeMeta = { partial: true }
+          return []
+        }
+        throw err
+      }
 
       const landedUrl = page.url()
       if (landedUrl.includes('/login') || landedUrl.includes('login.php')) {
@@ -206,7 +227,15 @@ export class FacebookAdapter extends BaseAdapter {
       // Wait up to 3 minutes for story_message to appear — the user can interact
       // with the browser window (scroll, dismiss dialogs) to trigger rendering.
       // Once posts appear the scraper takes over automatically.
-      await page.waitForSelector('[data-ad-rendering-role="story_message"]', { timeout: 180000 })
+      try {
+        await page.waitForSelector('[data-ad-rendering-role="story_message"]', { timeout: 180000 })
+      } catch (err) {
+        if (isTargetClosedError(err)) {
+          this.lastScrapeMeta = { partial: true }
+          return []
+        }
+        throw err
+      }
 
       // ── Section 4: Infinite scroll + post collection loop ───────────────────
       const {
@@ -218,65 +247,77 @@ export class FacebookAdapter extends BaseAdapter {
       const seenIds = new Set()
       const posts = []
       let hitDateLimit = false
+      let closedEarly = false
 
       while (seenIds.size < maxPosts && !hitDateLimit) {
-        // Expand all "See more" / "Tumingin pa" buttons.
-        // Use page.evaluate to find and click them all in-browser — avoids
-        // Playwright's cross-process overhead and handles visibility correctly.
-        const expanded = await page.evaluate((seeMoreTexts) => {
-          const results = []
-          const allBtns = [...document.querySelectorAll('[role="button"]')]
-          for (const btn of allBtns) {
-            const text = btn.innerText?.trim()
-            if (seeMoreTexts.some(t => text === t)) {
-              btn.click()
-              results.push(text)
+        try {
+          // Expand all "See more" / "Tumingin pa" buttons.
+          // Use page.evaluate to find and click them all in-browser — avoids
+          // Playwright's cross-process overhead and handles visibility correctly.
+          const expanded = await page.evaluate((seeMoreTexts) => {
+            const results = []
+            const allBtns = [...document.querySelectorAll('[role="button"]')]
+            for (const btn of allBtns) {
+              const text = btn.innerText?.trim()
+              if (seeMoreTexts.some(t => text === t)) {
+                btn.click()
+                results.push(text)
+              }
             }
+            return results
+          }, ['See more', 'Tumingin pa'])
+          if (expanded.length > 0) await page.waitForTimeout(600)
+
+          // Extract all visible post containers — skip skeletons and comments
+          const postEls = await page.$$(SELECTORS.POST_CONTAINER)
+          for (const el of postEls) {
+            const rawData = await extractPostData(el, pageConfig.pageId)
+            if (!rawData || seenIds.has(rawData.id)) continue
+
+            // Date-based stop: if the post has a date and it's before our cutoff, stop
+            if (stopDate && rawData.date && new Date(rawData.date) < stopDate) {
+              hitDateLimit = true
+              break
+            }
+
+            seenIds.add(rawData.id)
+            posts.push(this.normalizePost(rawData))
           }
-          return results
-        }, ['See more', 'Tumingin pa'])
-        if (expanded.length > 0) await page.waitForTimeout(600)
 
-        // Extract all visible post containers — skip skeletons and comments
-        const postEls = await page.$$(SELECTORS.POST_CONTAINER)
-        for (const el of postEls) {
-          const rawData = await extractPostData(el, pageConfig.pageId)
-          if (!rawData || seenIds.has(rawData.id)) continue
+          if (hitDateLimit) break
 
-          // Date-based stop: if the post has a date and it's before our cutoff, stop
-          if (stopDate && rawData.date && new Date(rawData.date) < stopDate) {
-            hitDateLimit = true
+          // Scroll down and wait for new content to load
+          const prevHeight = await page.evaluate(() => document.body.scrollHeight)
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+
+          // Poll for height change — bail after 5s if nothing loads
+          const scrollTimeout = Date.now() + 5000
+          let newHeight = prevHeight
+          while (Date.now() < scrollTimeout) {
+            await page.waitForTimeout(500)
+            newHeight = await page.evaluate(() => document.body.scrollHeight)
+            if (newHeight > prevHeight) break
+          }
+
+          // Extra settle time for new posts to finish rendering
+          await page.waitForTimeout(randomDelay(800, 1500))
+
+          if (newHeight === prevHeight) break
+        } catch (err) {
+          // User closed the browser window mid-scrape — finalize with whatever
+          // posts were already collected instead of losing them to the exception.
+          if (isTargetClosedError(err)) {
+            closedEarly = true
             break
           }
-
-          seenIds.add(rawData.id)
-          posts.push(this.normalizePost(rawData))
+          throw err
         }
-
-        if (hitDateLimit) break
-
-        // Scroll down and wait for new content to load
-        const prevHeight = await page.evaluate(() => document.body.scrollHeight)
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-
-        // Poll for height change — bail after 5s if nothing loads
-        const scrollTimeout = Date.now() + 5000
-        let newHeight = prevHeight
-        while (Date.now() < scrollTimeout) {
-          await page.waitForTimeout(500)
-          newHeight = await page.evaluate(() => document.body.scrollHeight)
-          if (newHeight > prevHeight) break
-        }
-
-        // Extra settle time for new posts to finish rendering
-        await page.waitForTimeout(randomDelay(800, 1500))
-
-        if (newHeight === prevHeight) break
       }
 
       // ── Section 5: Session persists in UDD automatically — nothing extra needed
 
       // ── Section 6: Return normalised posts ──────────────────────────────────
+      this.lastScrapeMeta = { partial: closedEarly }
       return posts
     } finally {
       await context.close().catch(() => {})

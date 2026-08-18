@@ -91,12 +91,16 @@ export class ScraperManager {
 
     const adapter = new AdapterClass(pageConfig)
     const posts = await adapter.scrape(pageConfig)
+    const partial = adapter.lastScrapeMeta?.partial ?? false
 
     onProgress({
       jobId,
       status: 'tagging',
-      message: `Scraped ${posts.length} posts. Tagging…`,
+      message: partial
+        ? `Window closed early — scraped ${posts.length} posts before stopping. Tagging…`
+        : `Scraped ${posts.length} posts. Tagging…`,
       postsFound: posts.length,
+      partial,
     })
 
     // Tag and persist in one transaction per batch for performance
@@ -116,7 +120,7 @@ export class ScraperManager {
 
     // Tag all posts first (async), then persist in sync batched transactions.
     // better-sqlite3 transactions must be synchronous — no async/await inside.
-    onProgress({ jobId, status: 'tagging', message: 'Tagging posts…', postsFound: posts.length })
+    onProgress({ jobId, status: 'tagging', message: 'Tagging posts…', postsFound: posts.length, partial })
 
     const tagged = await Promise.all(
       posts.map(async (post) => ({
@@ -165,14 +169,18 @@ export class ScraperManager {
         status: 'running',
         message: `Saved ${saved}/${tagged.length} posts…`,
         postsFound: saved,
+        partial,
       })
     }
 
     onProgress({
       jobId,
       status: 'done',
-      message: `Done. ${saved} posts saved.`,
+      message: partial
+        ? `Window closed early — saved ${saved} posts collected so far.`
+        : `Done. ${saved} posts saved.`,
       postsFound: saved,
+      partial,
     })
   }
 }
