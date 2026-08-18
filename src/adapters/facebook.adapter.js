@@ -105,6 +105,16 @@ function isTargetClosedError(err) {
   return /target (page|closed)|has been closed/i.test(err?.message ?? '')
 }
 
+// Facebook's checkpoint/2FA flow often fires a second, client-side redirect
+// before the first navigation's load events settle (e.g. it lands on a generic
+// checkpoint URL, then almost immediately redirects to the specific challenge
+// step). Playwright's waitForURL/waitForNavigation treats the interrupted first
+// navigation as an error ("... maybe frame was detached?") even though the page
+// is still open and the flow is still progressing — this is not a real close.
+function isNavigationInterruptedError(err) {
+  return /frame was detached|navigation.*(cancel|abort)/i.test(err?.message ?? '')
+}
+
 // ─── Shared launch options ────────────────────────────────────────────────────
 
 function makeLaunchOptions(locale = 'fil') {
@@ -384,21 +394,39 @@ export class FacebookAdapter extends BaseAdapter {
       // Wait until the user is fully logged in — confirmed by landing on the home
       // feed (facebook.com/ or facebook.com/home*). Captcha/checkpoint pages and
       // the login page itself won't match, so we keep waiting.
-      await page.waitForURL(
-        (url) => {
-          const s = url.toString()
-          return (
-            (s.startsWith('https://www.facebook.com/') || s.startsWith('https://facebook.com/')) &&
-            !s.includes('/login') &&
-            !s.includes('/checkpoint') &&
-            !s.includes('/recover') &&
-            !s.includes('/help') &&
-            !s.includes('/two_step') &&
-            !s.includes('/confirmemail')
-          )
-        },
-        { timeout: 300000 } // 5 minutes — plenty of time for captcha + login
-      )
+      const isLoggedInUrl = (url) => {
+        const s = url.toString()
+        return (
+          (s.startsWith('https://www.facebook.com/') || s.startsWith('https://facebook.com/')) &&
+          !s.includes('/login') &&
+          !s.includes('/checkpoint') &&
+          !s.includes('/recover') &&
+          !s.includes('/help') &&
+          !s.includes('/two_step') &&
+          !s.includes('/confirmemail')
+        )
+      }
+
+      // Facebook's 2FA/checkpoint flow frequently chains redirects (one
+      // navigation starts, then a second interrupts it before the first
+      // settles). Playwright surfaces the interrupted first navigation as a
+      // rejection even though the page is still open and the flow is still
+      // progressing, so a single waitForURL call would tear down the session
+      // on a false alarm. Retry through those specific errors, budgeting the
+      // full 5 minutes across the whole login attempt rather than per-call.
+      const deadline = Date.now() + 300000 // 5 minutes total for captcha + login
+      while (true) {
+        const timeout = deadline - Date.now()
+        if (timeout <= 0) throw new Error('Timed out waiting for Facebook login to complete')
+
+        try {
+          await page.waitForURL(isLoggedInUrl, { timeout })
+          break
+        } catch (err) {
+          if (isNavigationInterruptedError(err)) continue
+          throw err
+        }
+      }
 
       // Extra wait to ensure cookies are fully flushed to the UDD
       await page.waitForTimeout(2000)
